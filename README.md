@@ -35,8 +35,7 @@ You can test the Bazel:
 `which bazel`
 
 It should return:
-
-`bazel is /usr/local/bin/bazel`
+`/usr/local/bin/bazel`
 
 (4) Configure the build:
 
