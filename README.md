@@ -59,11 +59,13 @@ You can use the default setting in all options.
 
 `cp ./files/build_files/build.sh ./tensorflow-2.9.1/`
 
+Note that you can mofify the maximal number of jobs 
+
 ## Test
 
 1. Build the obfuscation library:
 
-`python obfuscation.py --extra_layer=30 --shortcut=30`
+`python obfuscation.py --extra_layer=30 --shortcut=0`
 
 2. Reinstall the TensorFlow:
 

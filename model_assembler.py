@@ -12,7 +12,7 @@ from utils.utils import *
 # def model_assembler(input, model_json, interpreter):
 
 
-def model_assembler(model_path, interpreter, json_path='/data/mingyi/code/obf_tf/obfop/ObfusedModel.json'):
+def model_assembler(model_path, interpreter, json_path='./ObfusedModel.json'):
     with open(json_path,'r') as f:
         model_json_f = f.read()
     model_json = json.loads(model_json_f)
@@ -28,7 +28,7 @@ def model_assembler(model_path, interpreter, json_path='/data/mingyi/code/obf_tf
     for op in model_json['oplist']:
         OpIDList.append(op['ObfusedId'])
 
-    model_file = '/data/mingyi/code/obf_tf/obfop/tf_model.py'
+    model_file = './tf_model.py'
     with fileinput.input(files=model_file, inplace=True) as f:
         del_sign = False
         for line in f:
@@ -57,7 +57,7 @@ def model_assembler(model_path, interpreter, json_path='/data/mingyi/code/obf_tf
         for line in f:
             if 'add the so file above' in line:
                 for i in range(len(OpIDList)):
-                    print('op_%s = tf.load_op_library(\'/data/mingyi/code/obf_tf/obfop/tf_output_file/%s.so\')' % (i, OpIDList[i]))
+                    print('op_%s = tf.load_op_library(\'./tf_output_file/%s.so\')' % (i, OpIDList[i]))
             elif 'add the data flow above' in line:
                 print('        out_%s = x' % (input_id))
                 while(len(OpIDList)):
