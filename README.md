@@ -40,6 +40,8 @@ Configure the build:
 
 `./configure`
 
+`cd ..`
+
 You can use the default setting in all options.
 
 Copy the 'BUILD' and 'register.cc' to the source code:  
