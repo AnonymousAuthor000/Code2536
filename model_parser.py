@@ -8,7 +8,7 @@ import json
 tfl_source_path = './tfl_source_file/'
 tfl_output_path = './tfl_output_file/'
 tf_source_path = './tf_source_file/'
-tf_output_path = './obf_tf/obfop/tf_output_file/'
+tf_output_path = './tf_output_file/'
 tfl_build_path = './tensorflow-2.9.1/tensorflow/lite/kernels/'
 register_file = './tensorflow-2.9.1/tensorflow/lite/kernels/register.cc'
 build_file = './tensorflow-2.9.1/tensorflow/lite/kernels/BUILD'
