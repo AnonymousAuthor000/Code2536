@@ -53,7 +53,7 @@ It should return:
 
 You can use the default setting in all options.
 
-(5) Copy the modified codes to the source code:  
+(5) Copy the congigurations and script to the source code:  
 
 `cp ./files/kernel_files/* ./tensorflow-2.9.1/tensorflow/lite/kernels/`
 
