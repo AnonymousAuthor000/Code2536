@@ -54,4 +54,16 @@ You can use the default setting in all options.
 
 2. Test
 
-`bash ./build_tfl.sh`
+(1) Build the obfuscation library:
+
+`python obfuscation.py --extra_layer=30 --shortcut=30`
+
+(2) Reinstall the TensorFlow:
+
+`pip uninstall -y tensorflow`
+
+`pip install /tmp/tensorflow_pkg/tensorflow-2.9.1-cp38-cp38-linux_x86_64.whl`
+
+(3) Test the obfuscated model:
+
+`python test_obf.py`
