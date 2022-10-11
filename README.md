@@ -65,7 +65,7 @@ Note that you can mofify the maximal number of jobs
 
 1. Build the obfuscation library:
 
-`python obfuscation.py --extra_layer=30 --shortcut=0`
+`python obfuscation.py --extra_layer=30 --shortcut=30`
 
 2. Reinstall the TensorFlow:
 
