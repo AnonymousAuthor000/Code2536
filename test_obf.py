@@ -16,7 +16,7 @@ def model_inference(interpreter, inputs):
         output = interpreter.get_tensor(output_details[0]['index'])
     return output
 
-model_path = './tflite_model/squeezenet.tflite'
+model_path = './tflite_model/fruit.tflite'
 
 # --------------------------------------------------
 # generate random data

@@ -53,7 +53,7 @@ def random_extra(model_json, out_start_point):
 
 
 model_path = './tflite_model/'
-model_name = 'squeezenet.tflite'
+model_name = 'fruit.tflite'
 interpreter = tf.lite.Interpreter(
  os.path.join(model_path, model_name)
 )
