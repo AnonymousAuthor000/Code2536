@@ -53,9 +53,11 @@ It should return:
 
 You can use the default setting in all options.
 
-(5) Copy the 'BUILD' and 'register.cc' to the source code:  
+(5) Copy the modified codes to the source code:  
 
-`cp ./files/* ./tensorflow-2.9.1/tensorflow/lite/kernels/`
+`cp ./files/kernel_files/* ./tensorflow-2.9.1/tensorflow/lite/kernels/`
+
+`cp ./files/build_files/build.sh ./tensorflow-2.9.1/`
 
 2. Test
 
