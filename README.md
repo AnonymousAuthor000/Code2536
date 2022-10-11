@@ -36,9 +36,11 @@ It should return:
 
 Configure the build:
 
+`cd tensorflow-2.9.1/`
+
 `./configure`
 
-You can disable all the options to speed up the test by inputing `N`.
+You can use the default setting in all options.
 
 Copy the 'BUILD' and 'register.cc' to the source code:  
 
