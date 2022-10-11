@@ -4,6 +4,12 @@ Code for the submission Code2536
 
 1. Preparation
 
+(0) Download the code:
+
+`git clone https://github.com/AnonymousAuthor000/Code2536.git`
+
+`cd Code2536`
+
 (1) The dependency can be found in `environment.yml`. To create the conda environment:
 
 `conda env create -f environment.yml`
