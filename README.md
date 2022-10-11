@@ -4,13 +4,17 @@ Code for the submission Code2536
 
 1. Preparation
 
-The dependency can be found in `environment.yml`. To create the conda environment:
+(1) The dependency can be found in `environment.yml`. To create the conda environment:
 
 `conda env create -f environment.yml`
 
 `conda activate code2536`
 
-First, you need to download the source code of the TensorFlow. Here we test our tool on v2.9.1.
+Install the Flatbuffer:
+
+`conda install -c conda-forge flatbuffers`
+
+(2) Download the source code of the TensorFlow. Here we test our tool on v2.9.1.
 
 `wget https://github.com/tensorflow/tensorflow/archive/refs/tags/v2.9.1.zip`
 
@@ -18,7 +22,7 @@ Unzip the file:
 
 `unzip v2.9.1`
 
-Download the Bazel:
+(3) Download the Bazel:
 
 `wget https://github.com/bazelbuild/bazelisk/releases/download/v1.14.0/bazelisk-linux-amd64`
 
@@ -34,7 +38,7 @@ It should return:
 
 `bazel is /usr/local/bin/bazel`
 
-Configure the build:
+(4) Configure the build:
 
 `cd tensorflow-2.9.1/`
 
@@ -44,7 +48,7 @@ Configure the build:
 
 You can use the default setting in all options.
 
-Copy the 'BUILD' and 'register.cc' to the source code:  
+(5) Copy the 'BUILD' and 'register.cc' to the source code:  
 
 `cp ./files/* ./tensorflow-2.9.1/tensorflow/lite/kernels/`
 
