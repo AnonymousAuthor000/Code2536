@@ -17,7 +17,7 @@ def remove_dir(filepath, del_build=False):
     del_list = os.listdir(filepath)
     for f in del_list:
         file_path = os.path.join(filepath, f)
-        if os.path.isfile(file_path):
+        if os.path.isfile(file_path) and f != '.gitignore':
             os.remove(file_path)
             if del_build:
                 os.remove(os.path.join(tfl_build_path, f))
