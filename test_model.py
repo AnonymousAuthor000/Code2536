@@ -24,8 +24,25 @@ model_path = './tflite_model/fruit.tflite'
 inputs = generate_random_data(model_path, batch_size=1000)[0]
 # print(inputs[0].shape)
 x = tf.constant(np.expand_dims(inputs[0], 0), dtype=tf.float32)
+
 # --------------------------------------------------
-# load TFLite model and allocate tensors
+# get the output of the obfuscated model
+# --------------------------------------------------
+interpreter = tf.lite.Interpreter(
+ 'obf_model.tflite', experimental_preserve_all_tensors=True
+)
+interpreter.allocate_tensors()
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+time_start=time.time()
+output_obf = model_inference(interpreter, inputs)
+time_end=time.time()
+print('obf time cost: ',time_end-time_start,'s')
+gc.collect()
+
+# --------------------------------------------------
+# get the output of the original model
 # --------------------------------------------------
 interpreter = tf.lite.Interpreter(
  model_path, experimental_preserve_all_tensors=True
@@ -33,33 +50,11 @@ interpreter = tf.lite.Interpreter(
 interpreter.allocate_tensors()
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
-# print(output_details)
+
 time_start=time.time()
-output_tfl = model_inference(interpreter, inputs)
+output_ori = model_inference(interpreter, inputs)
 time_end=time.time()
 print('ori time cost: ',time_end-time_start,'s')
 gc.collect()
 
-# --------------------------------------------------
-# assemble the obfuscated model
-# --------------------------------------------------
-model_assembler(model_path, interpreter)
-from tf_model import create_model
-create_model(x)
-
-# --------------------------------------------------
-# get the output of obfuscated model
-# --------------------------------------------------
-interpreter = tf.lite.Interpreter(
- 'model.tflite', experimental_preserve_all_tensors=True
-)
-interpreter.allocate_tensors()
-input_details = interpreter.get_input_details()
-output_details = interpreter.get_output_details()
-
-time_start=time.time()
-output_data = model_inference(interpreter, inputs)
-time_end=time.time()
-print('obf time cost: ',time_end-time_start,'s')
-gc.collect()
-print('obfuscation error:', (output_data.squeeze()-output_tfl.squeeze()).sum())
+print('obfuscation error:', (output_obf.squeeze()-output_ori.squeeze()).sum())

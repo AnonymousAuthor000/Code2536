@@ -73,6 +73,12 @@ Note that you can mofify the maximal number of jobs
 
 `pip install /tmp/tensorflow_pkg/tensorflow-2.9.1-cp38-cp38-linux_x86_64.whl`
 
-3. Test the obfuscated model:
+3. Generate the obfuscated model:
 
-`python test_obf.py`
+`python generate_obf.py`
+
+Then, the obfuscated model will be generated as 'obf_model.tflite' file. You can visualize the difference between the original model and obfuscated model by Netron (https://netron.app/).
+
+4. test the obfuscated model:
+
+`python test_model.py`

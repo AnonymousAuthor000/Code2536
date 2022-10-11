@@ -159,5 +159,5 @@ def create_model(x):
                                                                 model)
     converter.allow_custom_ops = True
     tflite_model = converter.convert()
-    with open('model.tflite', 'wb') as f:
+    with open('obf_model.tflite', 'wb') as f:
         f.write(tflite_model)
