@@ -1,4 +1,4 @@
-name: tflite_cus
+name: code2536
 channels:
   - pytorch
   - defaults
