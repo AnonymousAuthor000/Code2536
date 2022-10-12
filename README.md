@@ -20,6 +20,15 @@ Install the Flatbuffer:
 
 `conda install -c conda-forge flatbuffers`
 
+(if no npm) install the npm:
+
+`sudo apt-get install npm`
+
+Install the jsonrepair:
+
+`npm install -g jsonrepair`
+
+
 2. Download the source code of the TensorFlow. Here we test our tool on v2.9.1.
 
 `wget https://github.com/tensorflow/tensorflow/archive/refs/tags/v2.9.1.zip`
