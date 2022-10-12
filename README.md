@@ -82,6 +82,8 @@ Note that you can mofify the maximal number of jobs in the 'build.sh' script. He
 
 `pip install /tmp/tensorflow_pkg/tensorflow-2.9.1-cp38-cp38-linux_x86_64.whl`
 
+Note that if the default pip is not in the conda env (using command `which -a pip`), you can delete pip files in the '.local/bin/'.  
+
 3. Generate the obfuscated model:
 
 `python generate_obf.py`
