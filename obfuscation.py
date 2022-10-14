@@ -9,10 +9,12 @@ import argparse
 # import orjson
 # from tensorflow import keras
 from model_parser import *
+from generate_obf import *
 
 from utils.utils import *
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--model_name', type=str, default='fruit', help='name of the model')
 parser.add_argument('--extra_layer', type=int, default=0, help='number extra layer')
 parser.add_argument('--shortcut', type=int, default=0, help='number shortcut')
 opt = parser.parse_args()
@@ -53,7 +55,7 @@ def random_extra(model_json, out_start_point):
 
 
 model_path = './tflite_model/'
-model_name = 'fruit.tflite'
+model_name = opt.model_name + '.tflite'
 interpreter = tf.lite.Interpreter(
  os.path.join(model_path, model_name)
 )
@@ -122,3 +124,8 @@ file = open('./ObfusedModel.json', 'w')
 file.write(jsondata)
 file.close()
 
+# --------------------------------------------------
+# generate the obfuscated model
+# --------------------------------------------------
+generate_obf_model(os.path.join(model_path, model_name))
+gc.collect()

@@ -72,24 +72,8 @@ Note that you can mofify the maximal number of jobs in the 'build.sh' script. He
 
 ## Test
 
-1. Build the obfuscation library:
+1. Build the obfuscation model:
 
-`python obfuscation.py --extra_layer=30 --shortcut=30`
+`bash build_obf.sh`
 
-2. Reinstall the TensorFlow:
-
-`pip uninstall -y tensorflow`
-
-`pip install /tmp/tensorflow_pkg/tensorflow-2.9.1-cp38-cp38-linux_x86_64.whl`
-
-Note that if the default pip is not in the conda env (using the command `which -a pip`), you can delete pip files in the '.local/bin/'.  
-
-3. Generate the obfuscated model:
-
-`python generate_obf.py`
-
-Then, the obfuscated model will be generated as 'obf_model.tflite' file. You can visualize the difference between the original model and obfuscated model by Netron (https://netron.app/).
-
-4. test the obfuscated model:
-
-`python test_model.py`
+Note that you can modify the test model and obfuscation parameters in the script.

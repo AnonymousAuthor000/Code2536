@@ -12,16 +12,13 @@ from utils.utils import *
 # def model_assembler(input, model_json, interpreter):
 
 
-def model_assembler(model_path, interpreter, json_path='./ObfusedModel.json'):
+def model_assembler(interpreter, json_path='./ObfusedModel.json'):
     with open(json_path,'r') as f:
         model_json_f = f.read()
     model_json = json.loads(model_json_f)
 
-    # model_path = '/data/mingyi/code/obf_tf/tflite_model/skin.tflite'
     input_id = interpreter.get_input_details()[0]['index']
     output_id = [idx['index'] for idx in interpreter.get_output_details()]
-    # inputs = generate_random_data(model_path)
-    # x = tf.constant(inputs[0], dtype=tf.float32)
 
     OpList = model_json['oplist']
     OpIDList =[]
