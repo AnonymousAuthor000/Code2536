@@ -60,7 +60,7 @@ It should return:
 
 `cd ..`
 
-You can use the default setting in all options.
+You can use the default setting (just type Return/Enter for every option).
 
 5. Copy the congigurations and script to the source code:  
 
@@ -76,4 +76,4 @@ Note that you can mofify the maximal number of jobs in the 'build.sh' script. He
 
 `bash build_obf.sh`
 
-Note that you can modify the test model and obfuscation parameters in the script.
+Note that you can modify the test model and obfuscation parameters in the script. The obfuscated model is saved as the 'obf_model.tflite'.
