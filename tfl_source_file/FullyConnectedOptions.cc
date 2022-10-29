@@ -42,35 +42,73 @@ namespace randopname {
 
 namespace {
 
-const float filter_raw=;
+float filter_raw=;
 
-const float bias_raw=;
+float bias_raw=;
+
+bool has_conv_bias=;
 
 const TfLiteFusedActivation activation=;
 const TfLiteFullyConnectedWeightsFormat weights_format=;
 const bool keep_num_dims=;
 const bool asymmetric_quantize_inputs=;
 const TfLiteType filter_type=;
-const int32_t filter_input_channel=;
-const int32_t filter_output_channel=;
+const TfLiteType bias_type=;
 const int32_t filter_dims_raw=;
 const int filter_dims_size=;
 const int32_t bias_dims_raw=;
 const int bias_dims_size=;
 
-// const int32_t* filter_dims_data;
-const int32_t* filter_dims_data = filter_dims_raw;
-// const int32_t* bias_dims_data;
-const int32_t* bias_dims_data = bias_dims_raw;
+const float scale_filter=0.000000;
+const int32_t zero_point_filter=0;
+const float scale_bias=0.000000;
+const int32_t zero_point_bias=0;
 
-// const float* filter_data;
-auto* filter_data = filter_raw;
-// const float* bias_data;
-auto* bias_data = bias_raw;
-// filter_sparsity
+// // const int32_t* filter_dims_data;
+// const int32_t* filter_dims_data = filter_dims_raw;
+// // const int32_t* bias_dims_data;
+// const int32_t* bias_dims_data = bias_dims_raw;
 
-const bool is_sparse=false;
-// TfLiteSparsity* sparsity;
+// // const float* filter_data;
+// auto* filter_data = filter_raw;
+// // const float* bias_data;
+// auto* bias_data = bias_raw;
+// // filter_sparsity
+
+// const bool is_sparse=false;
+// // TfLiteSparsity* sparsity;
+
+TfLiteFullyConnectedParams ExtractFullyConnectedParams(
+                               TfLiteFullyConnectedWeightsFormat weights_format, 
+                               bool keep_num_dims, bool asymmetric_quantize_inputs, TfLiteFusedActivation activation) {
+  TfLiteFullyConnectedParams data_params;
+  data_params.weights_format = weights_format;
+  data_params.keep_num_dims = keep_num_dims;
+  data_params.asymmetric_quantize_inputs = asymmetric_quantize_inputs;
+  data_params.activation = activation;
+  return data_params;
+}
+
+
+void GetFullyConnectedTensor(TfLiteType type, const char* name, 
+                       TfLiteIntArray* tensor_dims_data, 
+                       TfLiteQuantizationParams quant_params, float* tensor_data,
+                       size_t bytes_size, TfLiteTensor* tensor) {
+  tensor->type = type;
+  tensor->name = name;
+  tensor->dims = tensor_dims_data;
+  tensor->params = quant_params;
+  // float* tensor_data;
+  // tensor_data = tensor_raw;
+  tensor->data.raw = reinterpret_cast<char*>(tensor_data);
+  tensor->bytes = bytes_size;
+  tensor->allocation_type = kTfLiteMemNone;
+  // data_0.allocation = allocation;
+  tensor->is_variable = false;
+  tensor->quantization.type = kTfLiteNoQuantization;
+  tensor->quantization.params = nullptr;
+  tensor->sparsity = nullptr;
+}
 
 bool SupportedSparsityFormat(const TfLiteSparsity& sparsity) {
   if (sparsity.dim_metadata[0].format == kTfLiteDimDense &&
@@ -162,10 +200,10 @@ inline TfLiteStatus CheckTypes(TfLiteContext* context,
                                const TfLiteTensor* bias, TfLiteTensor* output,
                                TfLiteFullyConnectedParams* params) {
   const bool is_quantized =
-      ((filter_type == kTfLiteUInt8) || (filter_type == kTfLiteInt8));
+      ((filter->type == kTfLiteUInt8) || (filter->type == kTfLiteInt8));
   const bool is_hybrid = is_quantized && (input->type == kTfLiteFloat32);
   const bool is_shuffled =
-      is_quantized && (weights_format ==
+      is_quantized && (params->weights_format ==
                        kTfLiteFullyConnectedWeightsFormatShuffled4x16Int8);
 
   // optional bias tensor.
@@ -176,7 +214,7 @@ inline TfLiteStatus CheckTypes(TfLiteContext* context,
   if (is_quantized) {
     if (is_shuffled) {
       TF_LITE_ENSURE_TYPES_EQ(context, input->type, kTfLiteUInt8);
-      TF_LITE_ENSURE_TYPES_EQ(context, filter_type, kTfLiteUInt8);
+      TF_LITE_ENSURE_TYPES_EQ(context, filter->type, kTfLiteUInt8);
       TF_LITE_ENSURE_TYPES_EQ(context, output->type, kTfLiteInt16);
       TF_LITE_ENSURE_EQ(context, is_optional_bias_int, true);
     } else if (is_hybrid) {
@@ -196,7 +234,7 @@ inline TfLiteStatus CheckTypes(TfLiteContext* context,
     // Only float32 is supported currently
     TF_LITE_ENSURE_TYPES_EQ(context, input->type, kTfLiteFloat32);
     TF_LITE_ENSURE_TYPES_EQ(context, output->type, kTfLiteFloat32);
-    TF_LITE_ENSURE_TYPES_EQ(context, filter_type, kTfLiteFloat32);
+    TF_LITE_ENSURE_TYPES_EQ(context, filter->type, kTfLiteFloat32);
     TF_LITE_ENSURE_EQ(context, is_optional_bias_float, true);
   }
 
@@ -220,23 +258,72 @@ void Free(TfLiteContext* context, void* buffer) {
 TfLiteStatus PrepareImpl(TfLiteContext* context, TfLiteNode* node) {
   // auto* params =
   //     reinterpret_cast<TfLiteFullyConnectedParams*>(node->builtin_data);
-
   TfLiteFullyConnectedParams* params;
+  TfLiteFullyConnectedParams data_params = ExtractFullyConnectedParams(
+                               weights_format, keep_num_dims,
+                               asymmetric_quantize_inputs, activation);
+  params = &data_params;
   OpData* data = reinterpret_cast<OpData*>(node->user_data);
   // Check we have all the inputs and outputs we need.
   // TF_LITE_ENSURE(context, node->inputs->size == 2 || node->inputs->size == 3);
   // Shuffled formats need a workspace to store the shuffled input activations.
   const int expected_outputs_count =
-      weights_format == kTfLiteFullyConnectedWeightsFormatDefault ? 1
+      params->weights_format == kTfLiteFullyConnectedWeightsFormatDefault ? 1
                                                                           : 2;
   TF_LITE_ENSURE_EQ(context, node->outputs->size, expected_outputs_count);
 
   const TfLiteTensor* input;
   TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, kInputTensor, &input));
-  const TfLiteTensor* filter;
+  // const TfLiteTensor* filter;
   // TF_LITE_ENSURE_OK(context,
   //                   GetInputSafe(context, node, kWeightsTensor, &filter));
-  const TfLiteTensor* bias = nullptr;
+  TfLiteTensor filter_tensor;
+  TfLiteIntArray* filter_dims_data = TfLiteIntArrayCreate(filter_dims_size);
+  int size_filter = 1;
+  for (int i = 0; i < filter_dims_size; i++) {
+    // std::cout << "dims_raw: " << dims_raw[i] << std::endl;
+    filter_dims_data->data[i] = filter_dims_raw[i];
+    size_filter *= filter_dims_raw[i];
+  }
+  size_t bytes_size_filter = sizeof(float) * size_filter;
+  TfLiteQuantizationParams filter_params;
+  filter_params.scale=scale_filter;
+  filter_params.zero_point=zero_point_filter;
+  float* filter_data;
+  filter_data = filter_raw;
+  GetFullyConnectedTensor(filter_type, "filter", filter_dims_data,
+                       filter_params, filter_data, 
+                       bytes_size_filter, &filter_tensor);
+  const TfLiteTensor* filter = &filter_tensor;
+
+  // const TfLiteTensor* bias =
+  //     (node->inputs->size == 3)
+  //         ? GetOptionalInputTensor(context, node, kBiasTensor)
+  //         : nullptr;
+  TfLiteTensor bias_tensor;
+  const TfLiteTensor* bias;
+  if (has_conv_bias) {
+    TfLiteIntArray* bias_dims_data = TfLiteIntArrayCreate(bias_dims_size);
+    int size_bias = 1;
+    for (int i = 0; i < bias_dims_size; i++) {
+      // std::cout << "dims_raw: " << dims_raw[i] << std::endl;
+      bias_dims_data->data[i] = bias_dims_raw[i];
+      size_bias *= bias_dims_raw[i];
+    }
+    size_t bytes_size_bias = sizeof(float) * size_bias;
+    TfLiteQuantizationParams bias_params;
+    bias_params.scale=scale_bias;
+    bias_params.zero_point=zero_point_bias;
+    float* bias_data;
+    bias_data = bias_raw;
+    GetFullyConnectedTensor(bias_type, "bias", bias_dims_data,
+                        bias_params, bias_data, 
+                        bytes_size_bias, &bias_tensor);
+    bias = &bias_tensor;
+  } else {
+    bias = nullptr;
+  }
+
   TfLiteTensor* output;
   TF_LITE_ENSURE_OK(context,
                     GetOutputSafe(context, node, kOutputTensor, &output));
@@ -252,13 +339,13 @@ TfLiteStatus PrepareImpl(TfLiteContext* context, TfLiteNode* node) {
     input_size *= input->dims->data[i];
   }
 
-  TF_LITE_ENSURE_EQ(context, filter_dims_size, 2);
-  TF_LITE_ENSURE(context, filter_input_channel != 0);
-  const int batch_size = input_size / filter_input_channel;
-  const int num_units = filter_output_channel;
+  TF_LITE_ENSURE_EQ(context, NumDimensions(filter), 2);
+  TF_LITE_ENSURE(context, filter->dims->data[1] != 0);
+  const int batch_size = input_size / filter->dims->data[1];
+  const int num_units = filter->dims->data[0];
 
   if (bias) {
-    TF_LITE_ENSURE_EQ(context, NumElements(bias), filter_output_channel);
+    TF_LITE_ENSURE_EQ(context, NumElements(bias), SizeOfDimension(filter, 0));
   }
 
   // Note that quantized inference requires that all tensors have their
@@ -272,7 +359,7 @@ TfLiteStatus PrepareImpl(TfLiteContext* context, TfLiteNode* node) {
     QuantizeMultiplier(real_multiplier, &data->output_multiplier, &exponent);
     data->output_shift = exponent;
     TF_LITE_ENSURE_STATUS(CalculateActivationRangeQuantized(
-        context, activation, output, &data->output_activation_min,
+        context, params->activation, output, &data->output_activation_min,
         &data->output_activation_max));
   }
 
@@ -288,8 +375,8 @@ TfLiteStatus PrepareImpl(TfLiteContext* context, TfLiteNode* node) {
   // quantized values prior to multiplication by the scaling factor.
   const bool is_hybrid =
       (input->type == kTfLiteFloat32 &&
-       (filter_type == kTfLiteUInt8 || filter_type == kTfLiteInt8));
-  // const bool is_sparse = filter->sparsity != nullptr;
+       (filter->type == kTfLiteUInt8 || filter->type == kTfLiteInt8));
+  const bool is_sparse = filter->sparsity != nullptr;
   if (is_hybrid) {
     TfLiteIntArrayFree(node->temporaries);
     data->compute_row_sums = true;
@@ -303,7 +390,7 @@ TfLiteStatus PrepareImpl(TfLiteContext* context, TfLiteNode* node) {
     TfLiteTensor* input_quantized;
     TF_LITE_ENSURE_OK(context, GetTemporarySafe(context, node, /*index=*/0,
                                                 &input_quantized));
-    input_quantized->type = filter_type;
+    input_quantized->type = filter->type;
     input_quantized->allocation_type = kTfLiteArenaRw;
 
     TfLiteIntArray* input_quantized_size = TfLiteIntArrayCopy(input->dims);
@@ -380,13 +467,13 @@ TfLiteStatus PrepareImpl(TfLiteContext* context, TfLiteNode* node) {
 
   // Resize output.
   TfLiteIntArray* output_size_array = nullptr;
-  if (keep_num_dims) {
+  if (params->keep_num_dims) {
     // When number of dimensions are kept the filter operates along the last
     // dimensions. In other words, for an input tensor with shape
     // [batch_size, ..., n_inputs] and a filter of shape [n_inputs, n_units]
     // this Op produces an output of shape [batch_size, ..., n_units].
     TF_LITE_ENSURE_EQ(context, input->dims->data[input->dims->size - 1],
-                      filter_input_channel);
+                      SizeOfDimension(filter, 1));
     output_size_array = TfLiteIntArrayCopy(input->dims);
     output_size_array->data[output_size_array->size - 1] = num_units;
   } else {
@@ -397,6 +484,7 @@ TfLiteStatus PrepareImpl(TfLiteContext* context, TfLiteNode* node) {
   }
   TF_LITE_ENSURE_OK(context,
                     context->ResizeTensor(context, output, output_size_array));
+
   return kTfLiteOk;
 }
 
@@ -406,23 +494,47 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   // auto* params =
   //     reinterpret_cast<TfLiteFullyConnectedParams*>(node->builtin_data);
   TfLiteFullyConnectedParams* params;
-  const TfLiteTensor* filter;
+  TfLiteFullyConnectedParams data_params = ExtractFullyConnectedParams(
+                               weights_format, keep_num_dims,
+                               asymmetric_quantize_inputs, activation);
+  params = &data_params;
+
+  // const TfLiteTensor* filter;
   // TF_LITE_ENSURE_OK(context,
   //                   GetInputSafe(context, node, kWeightsTensor, &filter));
+  TfLiteTensor filter_tensor;
+  TfLiteIntArray* filter_dims_data = TfLiteIntArrayCreate(filter_dims_size);
+  int size_filter = 1;
+  for (int i = 0; i < filter_dims_size; i++) {
+    // std::cout << "dims_raw: " << dims_raw[i] << std::endl;
+    filter_dims_data->data[i] = filter_dims_raw[i];
+    size_filter *= filter_dims_raw[i];
+  }
+  size_t bytes_size_filter = sizeof(float) * size_filter;
+  TfLiteQuantizationParams filter_params;
+  filter_params.scale=scale_filter;
+  filter_params.zero_point=zero_point_filter;
+  float* filter_data;
+  filter_data = filter_raw;
+  GetFullyConnectedTensor(filter_type, "filter", filter_dims_data,
+                       filter_params, filter_data, 
+                       bytes_size_filter, &filter_tensor);
+  const TfLiteTensor* filter = &filter_tensor;
+
   const TfLiteTensor* input;
   TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, kInputTensor, &input));
   const bool is_quantized =
-      ((filter_type == kTfLiteUInt8) || (filter_type == kTfLiteInt8));
+      ((filter->type == kTfLiteUInt8) || (filter->type == kTfLiteInt8));
   const bool is_hybrid = is_quantized && (input->type == kTfLiteFloat32);
   const bool is_pie = kernel_type == kLegacyPie;
 
   // Pie and hybrid path supports all kinds of fused activations, otherwise only
   // clipping activations are supported.
   if (!is_pie && !is_hybrid) {
-    TF_LITE_ENSURE(context, activation == kTfLiteActNone ||
-                                activation == kTfLiteActRelu ||
-                                activation == kTfLiteActReluN1To1 ||
-                                activation == kTfLiteActRelu6);
+    TF_LITE_ENSURE(context, params->activation == kTfLiteActNone ||
+                                params->activation == kTfLiteActRelu ||
+                                params->activation == kTfLiteActReluN1To1 ||
+                                params->activation == kTfLiteActRelu6);
   }
   return PrepareImpl(context, node);
 }
@@ -432,15 +544,13 @@ TfLiteStatus EvalPie(TfLiteContext* context, TfLiteNode* node,
                      const TfLiteTensor* input, const TfLiteTensor* filter,
                      const TfLiteTensor* bias, TfLiteTensor* output) {
   int total_input_size = 1;
-  // const float* filter_data;
-  // filter_data = filter_raw;
   for (int i = 0; i < input->dims->size; i++) {
     total_input_size *= input->dims->data[i];
   }
 
-  int input_size = filter_input_channel;
-  const int batch_size = total_input_size / filter_input_channel;
-  const int num_units = filter_output_channel;
+  int input_size = filter->dims->data[1];
+  const int batch_size = total_input_size / filter->dims->data[1];
+  const int num_units = filter->dims->data[0];
 
   // Output = bias if bias tensor exists.
   if (bias) {
@@ -453,368 +563,353 @@ TfLiteStatus EvalPie(TfLiteContext* context, TfLiteNode* node,
 
   // Compute output += weight * input
   tensor_utils::MatrixBatchVectorMultiplyAccumulate(
-      filter_data, num_units, input_size,
+      GetTensorData<float>(filter), num_units, input_size,
       GetTensorData<float>(input), batch_size, GetTensorData<float>(output));
 
   // Apply activation function
   tensor_utils::ApplyActivationToVector(
-      GetTensorData<float>(output), batch_size * num_units, activation,
+      GetTensorData<float>(output), batch_size * num_units, params->activation,
       GetTensorData<float>(output));
 
   return kTfLiteOk;
 }
 
-// TfLiteStatus EvalHybridDense(
-//     TfLiteContext* context, TfLiteNode* node,
-//     TfLiteFullyConnectedParams* params, OpData* data, const TfLiteTensor* input,
-//     const TfLiteTensor* filter, const TfLiteTensor* bias,
-//     TfLiteTensor* input_quantized, TfLiteTensor* scaling_factors,
-//     TfLiteTensor* accum_scratch, TfLiteTensor* row_sums,
-//     TfLiteTensor* input_offsets, TfLiteTensor* output) {
-//   int total_input_size = 1;
-//   for (int i = 0; i < input->dims->size; i++) {
-//     total_input_size *= input->dims->data[i];
-//   }
+TfLiteStatus EvalHybridDense(
+    TfLiteContext* context, TfLiteNode* node,
+    TfLiteFullyConnectedParams* params, OpData* data, const TfLiteTensor* input,
+    const TfLiteTensor* filter, const TfLiteTensor* bias,
+    TfLiteTensor* input_quantized, TfLiteTensor* scaling_factors,
+    TfLiteTensor* accum_scratch, TfLiteTensor* row_sums,
+    TfLiteTensor* input_offsets, TfLiteTensor* output) {
+  int total_input_size = 1;
+  for (int i = 0; i < input->dims->size; i++) {
+    total_input_size *= input->dims->data[i];
+  }
 
-//   const int input_size = filter_input_channel;
-//   const int batch_size = total_input_size / filter_input_channel;
-//   const int num_units = filter_output_channel;
+  const int input_size = filter->dims->data[1];
+  const int batch_size = total_input_size / filter->dims->data[1];
+  const int num_units = filter->dims->data[0];
 
-//   // Output = bias if bias tensor exists.
-//   if (bias) {
-//     tensor_utils::VectorBatchVectorAssign(GetTensorData<float>(bias), num_units,
-//                                           batch_size,
-//                                           GetTensorData<float>(output));
-//   } else {
-//     std::fill_n(GetTensorData<float>(output), batch_size * num_units, 0.0f);
-//   }
+  // Output = bias if bias tensor exists.
+  if (bias) {
+    tensor_utils::VectorBatchVectorAssign(GetTensorData<float>(bias), num_units,
+                                          batch_size,
+                                          GetTensorData<float>(output));
+  } else {
+    std::fill_n(GetTensorData<float>(output), batch_size * num_units, 0.0f);
+  }
 
-//   // Save matrix multiplication computation for all zero input.
-//   if (tensor_utils::IsZeroVector(GetTensorData<float>(input),
-//                                  total_input_size)) {
-//     tensor_utils::ApplyActivationToVector(
-//         GetTensorData<float>(output), batch_size * num_units,
-//         activation, GetTensorData<float>(output));
-//     return kTfLiteOk;
-//   }
+  // Save matrix multiplication computation for all zero input.
+  if (tensor_utils::IsZeroVector(GetTensorData<float>(input),
+                                 total_input_size)) {
+    tensor_utils::ApplyActivationToVector(
+        GetTensorData<float>(output), batch_size * num_units,
+        params->activation, GetTensorData<float>(output));
+    return kTfLiteOk;
+  }
 
-//   // Quantize input from float to uint8 + quantization params (scaling factor).
-//   float* scaling_factors_ptr = GetTensorData<float>(scaling_factors);
-//   int32_t* input_offset_ptr = nullptr;
-//   int32_t* row_sums_ptr = nullptr;
-//   if (asymmetric_quantize_inputs) {
-//     input_offset_ptr = GetTensorData<int32_t>(input_offsets);
-//     row_sums_ptr = GetTensorData<int32_t>(row_sums);
-//   }
-//   int8_t* quant_data = GetTensorData<int8_t>(input_quantized);
-//   // const int8_t* filter_data = GetTensorData<int8_t>(filter);
-//   // const int8_t* filter_data;
-//   // filter_data = filter_raw;
-//   const float* input_ptr = GetTensorData<float>(input);
-//   tensor_utils::BatchQuantizeFloats(
-//       input_ptr, batch_size, input_size, quant_data, scaling_factors_ptr,
-//       input_offset_ptr, asymmetric_quantize_inputs);
-//   for (int b = 0; b < batch_size; ++b) {
-//     // Incorporate scaling of the filter.
-//     scaling_factors_ptr[b] *= filter->params.scale;
-//   }
+  // Quantize input from float to uint8 + quantization params (scaling factor).
+  float* scaling_factors_ptr = GetTensorData<float>(scaling_factors);
+  int32_t* input_offset_ptr = nullptr;
+  int32_t* row_sums_ptr = nullptr;
+  if (params->asymmetric_quantize_inputs) {
+    input_offset_ptr = GetTensorData<int32_t>(input_offsets);
+    row_sums_ptr = GetTensorData<int32_t>(row_sums);
+  }
+  int8_t* quant_data = GetTensorData<int8_t>(input_quantized);
+  const int8_t* filter_data = GetTensorData<int8_t>(filter);
+  const float* input_ptr = GetTensorData<float>(input);
+  tensor_utils::BatchQuantizeFloats(
+      input_ptr, batch_size, input_size, quant_data, scaling_factors_ptr,
+      input_offset_ptr, params->asymmetric_quantize_inputs);
+  for (int b = 0; b < batch_size; ++b) {
+    // Incorporate scaling of the filter.
+    scaling_factors_ptr[b] *= filter->params.scale;
+  }
 
-//   // Compute output += weight * quantized_input
-//   int32_t* scratch = GetTensorData<int32_t>(accum_scratch);
-//   tensor_utils::MatrixBatchVectorMultiplyAccumulate(
-//       filter_data, num_units, input_size, quant_data, scaling_factors_ptr,
-//       batch_size, GetTensorData<float>(output), /*per_channel_scale=*/nullptr,
-//       input_offset_ptr, scratch, row_sums_ptr, &data->compute_row_sums,
-//       CpuBackendContext::GetFromContext(context));
+  // Compute output += weight * quantized_input
+  int32_t* scratch = GetTensorData<int32_t>(accum_scratch);
+  tensor_utils::MatrixBatchVectorMultiplyAccumulate(
+      filter_data, num_units, input_size, quant_data, scaling_factors_ptr,
+      batch_size, GetTensorData<float>(output), /*per_channel_scale=*/nullptr,
+      input_offset_ptr, scratch, row_sums_ptr, &data->compute_row_sums,
+      CpuBackendContext::GetFromContext(context));
 
-//   // Apply activation function to floats.
-//   tensor_utils::ApplyActivationToVector(
-//       GetTensorData<float>(output), batch_size * num_units, activation,
-//       GetTensorData<float>(output));
-//   return kTfLiteOk;
-// }
+  // Apply activation function to floats.
+  tensor_utils::ApplyActivationToVector(
+      GetTensorData<float>(output), batch_size * num_units, params->activation,
+      GetTensorData<float>(output));
+  return kTfLiteOk;
+}
 
-// void EvalSparseHybridImpl(TfLiteContext* context, TfLiteNode* node,
-//                           TfLiteFullyConnectedParams* params, OpData* data,
-//                           const TfLiteTensor* input, const TfLiteTensor* filter,
-//                           const TfLiteTensor* bias, int thread_start,
-//                           int thread_end, TfLiteTensor* input_quantized,
-//                           TfLiteTensor* scaling_factors,
-//                           TfLiteTensor* accum_scratch, TfLiteTensor* row_sums,
-//                           TfLiteTensor* input_offsets, TfLiteTensor* output) {
-//   ruy::profiler::ScopeLabel label("FullyConnected");
-//   ruy::profiler::ScopeLabel inner_label("Sparse Hybrid Kernel");
-//   const auto& input_shape = GetTensorShape(input);
-//   const auto& output_shape = GetTensorShape(output);
-//   const auto& filter_shape = RuntimeShape(filter_dims_size, filter_dims_data);
-//   const int input_dims_count = input_shape.DimensionsCount();
-//   const int output_dims_count = output_shape.DimensionsCount();
-//   const int filter_dims_count = filter_shape.DimensionsCount();
-//   const int batch_size = thread_end - thread_start;
-//   const int input_depth = MatchingDim(filter_shape, filter_dims_count - 1,
-//                                       input_shape, input_dims_count - 1);
-//   const int output_depth = MatchingDim(filter_shape, filter_dims_count - 2,
-//                                        output_shape, output_dims_count - 1);
-//   const int per_thread_input_size = batch_size * input_depth;
+void EvalSparseHybridImpl(TfLiteContext* context, TfLiteNode* node,
+                          TfLiteFullyConnectedParams* params, OpData* data,
+                          const TfLiteTensor* input, const TfLiteTensor* filter,
+                          const TfLiteTensor* bias, int thread_start,
+                          int thread_end, TfLiteTensor* input_quantized,
+                          TfLiteTensor* scaling_factors,
+                          TfLiteTensor* accum_scratch, TfLiteTensor* row_sums,
+                          TfLiteTensor* input_offsets, TfLiteTensor* output) {
+  ruy::profiler::ScopeLabel label("FullyConnected");
+  ruy::profiler::ScopeLabel inner_label("Sparse Hybrid Kernel");
+  const auto& input_shape = GetTensorShape(input);
+  const auto& output_shape = GetTensorShape(output);
+  const auto& filter_shape = GetTensorShape(filter);
+  const int input_dims_count = input_shape.DimensionsCount();
+  const int output_dims_count = output_shape.DimensionsCount();
+  const int filter_dims_count = filter_shape.DimensionsCount();
+  const int batch_size = thread_end - thread_start;
+  const int input_depth = MatchingDim(filter_shape, filter_dims_count - 1,
+                                      input_shape, input_dims_count - 1);
+  const int output_depth = MatchingDim(filter_shape, filter_dims_count - 2,
+                                       output_shape, output_dims_count - 1);
+  const int per_thread_input_size = batch_size * input_depth;
 
-//   const float* per_thread_input =
-//       GetTensorData<float>(input) + thread_start * input_depth;
-//   float* per_thread_output =
-//       GetTensorData<float>(output) + thread_start * output_depth;
+  const float* per_thread_input =
+      GetTensorData<float>(input) + thread_start * input_depth;
+  float* per_thread_output =
+      GetTensorData<float>(output) + thread_start * output_depth;
 
-//   // Output = bias if bias tensor exists.
-//   if (bias) {
-//     tensor_utils::VectorBatchVectorAssign(GetTensorData<float>(bias),
-//                                           output_depth, batch_size,
-//                                           per_thread_output);
-//   } else {
-//     std::fill_n(per_thread_output, batch_size * output_depth, 0.0f);
-//   }
+  // Output = bias if bias tensor exists.
+  if (bias) {
+    tensor_utils::VectorBatchVectorAssign(GetTensorData<float>(bias),
+                                          output_depth, batch_size,
+                                          per_thread_output);
+  } else {
+    std::fill_n(per_thread_output, batch_size * output_depth, 0.0f);
+  }
 
-//   // Save matrix multiplication computation for all zero input.
-//   if (tensor_utils::IsZeroVector(per_thread_input, per_thread_input_size)) {
-//     tensor_utils::ApplyActivationToVector(
-//         per_thread_output, batch_size * output_depth, activation,
-//         per_thread_output);
-//     return;
-//   }
+  // Save matrix multiplication computation for all zero input.
+  if (tensor_utils::IsZeroVector(per_thread_input, per_thread_input_size)) {
+    tensor_utils::ApplyActivationToVector(
+        per_thread_output, batch_size * output_depth, params->activation,
+        per_thread_output);
+    return;
+  }
 
-//   // Quantize input from float to uint8 + quantization params (scaling factor).
-//   float* scaling_factors_ptr =
-//       GetTensorData<float>(scaling_factors) + thread_start;
-//   int32_t* input_offset_ptr = nullptr;
-//   int32_t* row_sums_ptr = nullptr;
-//   if (asymmetric_quantize_inputs) {
-//     input_offset_ptr = GetTensorData<int32_t>(input_offsets) + thread_start;
-//     row_sums_ptr = GetTensorData<int32_t>(row_sums);
-//   }
-//   int8_t* quant_data =
-//       GetTensorData<int8_t>(input_quantized) + thread_start * input_depth;
-//   tensor_utils::BatchQuantizeFloats(per_thread_input, batch_size, input_depth,
-//                                     quant_data, scaling_factors_ptr,
-//                                     input_offset_ptr,
-//                                     asymmetric_quantize_inputs);
-//   for (int b = 0; b < batch_size; ++b) {
-//     // Incorporate scaling of the filter.
-//     scaling_factors_ptr[b] *= filter->params.scale;
-//   }
+  // Quantize input from float to uint8 + quantization params (scaling factor).
+  float* scaling_factors_ptr =
+      GetTensorData<float>(scaling_factors) + thread_start;
+  int32_t* input_offset_ptr = nullptr;
+  int32_t* row_sums_ptr = nullptr;
+  if (params->asymmetric_quantize_inputs) {
+    input_offset_ptr = GetTensorData<int32_t>(input_offsets) + thread_start;
+    row_sums_ptr = GetTensorData<int32_t>(row_sums);
+  }
+  int8_t* quant_data =
+      GetTensorData<int8_t>(input_quantized) + thread_start * input_depth;
+  tensor_utils::BatchQuantizeFloats(per_thread_input, batch_size, input_depth,
+                                    quant_data, scaling_factors_ptr,
+                                    input_offset_ptr,
+                                    params->asymmetric_quantize_inputs);
+  for (int b = 0; b < batch_size; ++b) {
+    // Incorporate scaling of the filter.
+    scaling_factors_ptr[b] *= filter->params.scale;
+  }
 
-//   if (asymmetric_quantize_inputs) {
-//     float* per_thread_output_ptr = per_thread_output;
-//     for (int b = 0; b < batch_size; ++b) {
-//       const float scaled_zp = scaling_factors_ptr[b] * input_offset_ptr[b];
-//       for (int row = 0; row < output_depth; ++row) {
-//         *per_thread_output_ptr++ -= scaled_zp * row_sums_ptr[row];
-//       }
-//     }
-//   }
+  if (params->asymmetric_quantize_inputs) {
+    float* per_thread_output_ptr = per_thread_output;
+    for (int b = 0; b < batch_size; ++b) {
+      const float scaled_zp = scaling_factors_ptr[b] * input_offset_ptr[b];
+      for (int row = 0; row < output_depth; ++row) {
+        *per_thread_output_ptr++ -= scaled_zp * row_sums_ptr[row];
+      }
+    }
+  }
 
-//   // Compute output += weight * quantized_input
-//   TfLiteTensor* filter_ledger = &context->tensors[node->temporaries->data[5]];
-//   tensor_utils::SparseMatrixBatchVectorMultiplyAccumulate(
-//       GetTensorData<int8_t>(filter), GetTensorData<uint8_t>(filter_ledger),
-//       output_depth, input_depth, quant_data, scaling_factors_ptr, batch_size,
-//       per_thread_output);
+  // Compute output += weight * quantized_input
+  TfLiteTensor* filter_ledger = &context->tensors[node->temporaries->data[5]];
+  tensor_utils::SparseMatrixBatchVectorMultiplyAccumulate(
+      GetTensorData<int8_t>(filter), GetTensorData<uint8_t>(filter_ledger),
+      output_depth, input_depth, quant_data, scaling_factors_ptr, batch_size,
+      per_thread_output);
 
-//   // Apply activation function to floats.
-//   tensor_utils::ApplyActivationToVector(per_thread_output,
-//                                         batch_size * output_depth,
-//                                         activation, per_thread_output);
-// }
+  // Apply activation function to floats.
+  tensor_utils::ApplyActivationToVector(per_thread_output,
+                                        batch_size * output_depth,
+                                        params->activation, per_thread_output);
+}
 
-// struct SparseHybridFullyConnectedTask : cpu_backend_threadpool::Task {
-//   SparseHybridFullyConnectedTask(
-//       TfLiteContext* context, TfLiteNode* node,
-//       TfLiteFullyConnectedParams* params, OpData* data,
-//       const TfLiteTensor* input, const TfLiteTensor* filter,
-//       const TfLiteTensor* bias, const int thread_start, const int thread_end,
-//       TfLiteTensor* input_quantized, TfLiteTensor* scaling_factors,
-//       TfLiteTensor* accum_scratch, TfLiteTensor* row_sums,
-//       TfLiteTensor* input_offsets, TfLiteTensor* output)
-//       : context(context),
-//         node(node),
-//         params(params),
-//         data(data),
-//         input(input),
-//         filter(filter),
-//         bias(bias),
-//         thread_start(thread_start),
-//         thread_end(thread_end),
-//         input_quantized(input_quantized),
-//         scaling_factors(scaling_factors),
-//         accum_scratch(accum_scratch),
-//         row_sums(row_sums),
-//         input_offsets(input_offsets),
-//         output(output) {}
+struct SparseHybridFullyConnectedTask : cpu_backend_threadpool::Task {
+  SparseHybridFullyConnectedTask(
+      TfLiteContext* context, TfLiteNode* node,
+      TfLiteFullyConnectedParams* params, OpData* data,
+      const TfLiteTensor* input, const TfLiteTensor* filter,
+      const TfLiteTensor* bias, const int thread_start, const int thread_end,
+      TfLiteTensor* input_quantized, TfLiteTensor* scaling_factors,
+      TfLiteTensor* accum_scratch, TfLiteTensor* row_sums,
+      TfLiteTensor* input_offsets, TfLiteTensor* output)
+      : context(context),
+        node(node),
+        params(params),
+        data(data),
+        input(input),
+        filter(filter),
+        bias(bias),
+        thread_start(thread_start),
+        thread_end(thread_end),
+        input_quantized(input_quantized),
+        scaling_factors(scaling_factors),
+        accum_scratch(accum_scratch),
+        row_sums(row_sums),
+        input_offsets(input_offsets),
+        output(output) {}
 
-//   void Run() override {
-//     EvalSparseHybridImpl(context, node, params, data, input, filter, bias,
-//                          thread_start, thread_end, input_quantized,
-//                          scaling_factors, accum_scratch, row_sums,
-//                          input_offsets, output);
-//   }
+  void Run() override {
+    EvalSparseHybridImpl(context, node, params, data, input, filter, bias,
+                         thread_start, thread_end, input_quantized,
+                         scaling_factors, accum_scratch, row_sums,
+                         input_offsets, output);
+  }
 
-//  private:
-//   TfLiteContext* context;
-//   TfLiteNode* node;
-//   TfLiteFullyConnectedParams* params;
-//   OpData* data;
-//   const TfLiteTensor* input;
-//   const TfLiteTensor* filter;
-//   const TfLiteTensor* bias;
-//   const int thread_start;
-//   const int thread_end;
-//   TfLiteTensor* input_quantized;
-//   TfLiteTensor* scaling_factors;
-//   TfLiteTensor* accum_scratch;
-//   TfLiteTensor* row_sums;
-//   TfLiteTensor* input_offsets;
-//   TfLiteTensor* output;
-// };
+ private:
+  TfLiteContext* context;
+  TfLiteNode* node;
+  TfLiteFullyConnectedParams* params;
+  OpData* data;
+  const TfLiteTensor* input;
+  const TfLiteTensor* filter;
+  const TfLiteTensor* bias;
+  const int thread_start;
+  const int thread_end;
+  TfLiteTensor* input_quantized;
+  TfLiteTensor* scaling_factors;
+  TfLiteTensor* accum_scratch;
+  TfLiteTensor* row_sums;
+  TfLiteTensor* input_offsets;
+  TfLiteTensor* output;
+};
 
-// TfLiteStatus EvalHybrid(TfLiteContext* context, TfLiteNode* node,
-//                         TfLiteFullyConnectedParams* params, OpData* data,
-//                         const TfLiteTensor* input, const TfLiteTensor* filter,
-//                         const TfLiteTensor* bias, TfLiteTensor* input_quantized,
-//                         TfLiteTensor* scaling_factors,
-//                         TfLiteTensor* accum_scratch, TfLiteTensor* row_sums,
-//                         TfLiteTensor* input_offsets, TfLiteTensor* output) {
-//   const auto& output_shape = GetTensorShape(output);
-//   CpuBackendContext* cpu_backend_context =
-//       CpuBackendContext::GetFromContext(context);
-//   const bool is_dense = filter->sparsity == nullptr;
-//   if (is_dense) {
-//     return EvalHybridDense(context, node, params, data, input, filter, bias,
-//                            input_quantized, scaling_factors, accum_scratch,
-//                            row_sums, input_offsets, output);
-//   }
+TfLiteStatus EvalHybrid(TfLiteContext* context, TfLiteNode* node,
+                        TfLiteFullyConnectedParams* params, OpData* data,
+                        const TfLiteTensor* input, const TfLiteTensor* filter,
+                        const TfLiteTensor* bias, TfLiteTensor* input_quantized,
+                        TfLiteTensor* scaling_factors,
+                        TfLiteTensor* accum_scratch, TfLiteTensor* row_sums,
+                        TfLiteTensor* input_offsets, TfLiteTensor* output) {
+  const auto& output_shape = GetTensorShape(output);
+  CpuBackendContext* cpu_backend_context =
+      CpuBackendContext::GetFromContext(context);
+  const bool is_dense = filter->sparsity == nullptr;
+  if (is_dense) {
+    return EvalHybridDense(context, node, params, data, input, filter, bias,
+                           input_quantized, scaling_factors, accum_scratch,
+                           row_sums, input_offsets, output);
+  }
 
-//   TfLiteTensor* filter_ledger = &context->tensors[node->temporaries->data[5]];
-//   if (!data->ledger_initialized) {
-//     PopulateLedgerData(filter->sparsity, context,
-//                        GetTensorData<uint8_t>(filter_ledger));
-//     data->ledger_initialized = true;
-//   }
-//   // const int8_t* filter_data;
-//   // filter_data = filter_raw;
-//   // The multi-threaded kernel slices the workload along the batch dimension. If
-//   // there's not enough batches of data, the number of threads used is equal to
-//   // the batch size.
-//   // TODO(b/173442777): If needed, we can improve this later with slicing along
-//   // the row dimension of the weight.
-//   const int max_threads = cpu_backend_context->max_num_threads();
-//   const int batches =
-//       FlatSizeSkipDim(output_shape, output_shape.DimensionsCount() - 1);
-//   const int thread_count = std::max(1, std::min(batches, max_threads));
-//   if (asymmetric_quantize_inputs && data->compute_row_sums) {
-//     // Precompute row sums.
-//     static const int kBlockSize = 16;
-//     const uint8_t* ledger_ptr = GetTensorData<uint8_t>(filter_ledger);
-//     const int8_t* row_ptr = filter_data;
-//     const int output_depth = filter_output_channel;
-//     int32_t* row_sums_ptr = GetTensorData<int32_t>(row_sums);
-//     for (int row = 0; row < output_depth; ++row) {
-//       int32_t row_sum = 0;
-//       int num_nonzero_blocks = *ledger_ptr++;
-//       for (int i = 0; i < num_nonzero_blocks; ++i, ++ledger_ptr) {
-//         for (int c = 0; c < kBlockSize; c++) {
-//           row_sum += (*row_ptr++);
-//         }
-//       }
-//       row_sums_ptr[row] = row_sum;
-//     }
-//     data->compute_row_sums = false;
-//   }
-//   std::vector<SparseHybridFullyConnectedTask> tasks;
-//   tasks.reserve(thread_count);
-//   int thread_start = 0;
-//   for (int i = 0; i < thread_count; ++i) {
-//     // This makes sure the workload is relatively balanced when batches is not
-//     // a multiple of thread_count. The first mod(batches, thread_count) tasks
-//     // need to process one more batch than the rest.
-//     int thread_end = thread_start + batches / thread_count;
-//     if (i < batches % thread_count) thread_end++;
+  TfLiteTensor* filter_ledger = &context->tensors[node->temporaries->data[5]];
+  if (!data->ledger_initialized) {
+    PopulateLedgerData(filter->sparsity, context,
+                       GetTensorData<uint8_t>(filter_ledger));
+    data->ledger_initialized = true;
+  }
 
-//     tasks.emplace_back(context, node, params, data, input, filter, bias,
-//                        thread_start, thread_end, input_quantized,
-//                        scaling_factors, accum_scratch, row_sums, input_offsets,
-//                        output);
-//     thread_start = thread_end;
-//   }
-//   cpu_backend_threadpool::Execute(tasks.size(), tasks.data(),
-//                                   cpu_backend_context);
-//   return kTfLiteOk;
-// }
+  // The multi-threaded kernel slices the workload along the batch dimension. If
+  // there's not enough batches of data, the number of threads used is equal to
+  // the batch size.
+  // TODO(b/173442777): If needed, we can improve this later with slicing along
+  // the row dimension of the weight.
+  const int max_threads = cpu_backend_context->max_num_threads();
+  const int batches =
+      FlatSizeSkipDim(output_shape, output_shape.DimensionsCount() - 1);
+  const int thread_count = std::max(1, std::min(batches, max_threads));
+  if (params->asymmetric_quantize_inputs && data->compute_row_sums) {
+    // Precompute row sums.
+    static const int kBlockSize = 16;
+    const uint8_t* ledger_ptr = GetTensorData<uint8_t>(filter_ledger);
+    const int8_t* row_ptr = GetTensorData<int8_t>(filter);
+    const int output_depth = filter->dims->data[0];
+    int32_t* row_sums_ptr = GetTensorData<int32_t>(row_sums);
+    for (int row = 0; row < output_depth; ++row) {
+      int32_t row_sum = 0;
+      int num_nonzero_blocks = *ledger_ptr++;
+      for (int i = 0; i < num_nonzero_blocks; ++i, ++ledger_ptr) {
+        for (int c = 0; c < kBlockSize; c++) {
+          row_sum += (*row_ptr++);
+        }
+      }
+      row_sums_ptr[row] = row_sum;
+    }
+    data->compute_row_sums = false;
+  }
+  std::vector<SparseHybridFullyConnectedTask> tasks;
+  tasks.reserve(thread_count);
+  int thread_start = 0;
+  for (int i = 0; i < thread_count; ++i) {
+    // This makes sure the workload is relatively balanced when batches is not
+    // a multiple of thread_count. The first mod(batches, thread_count) tasks
+    // need to process one more batch than the rest.
+    int thread_end = thread_start + batches / thread_count;
+    if (i < batches % thread_count) thread_end++;
 
-// namespace {
-// template <KernelType kernel_type>
-// void FullyConnectedInt8(const OpData* data, const TfLiteTensor* input,
-//                         const TfLiteTensor* filter, const TfLiteTensor* bias,
-//                         TfLiteTensor* output,
-//                         CpuBackendContext* cpu_backend_context) {
-//   // const int8_t* filter_data;
-//   // filter_data = filter_raw;
-//   // const int32_t* bias_data;
-//   // bias_data = bias_raw;
-//   FullyConnectedParams op_params;
-//   op_params.input_offset = -input->params.zero_point;
-//   op_params.weights_offset = -filter->params.zero_point;
-//   op_params.output_offset = output->params.zero_point;
-//   op_params.output_multiplier = data->output_multiplier;
-//   op_params.output_shift = data->output_shift;
-//   op_params.quantized_activation_min = data->output_activation_min;
-//   op_params.quantized_activation_max = data->output_activation_max;
-//   op_params.lhs_cacheable = true;
-//   op_params.rhs_cacheable = IsConstantTensor(input);
-//   if (kernel_type == kReference) {
-//     reference_integer_ops::FullyConnected(
-//         op_params, GetTensorShape(input), GetTensorData<int8_t>(input),
-//         RuntimeShape(filter_dims_size, filter_dims_data), filter_data,
-//         RuntimeShape(bias_dims_size, bias_dims_data), bias_data,
-//         GetTensorShape(output), GetTensorData<int8_t>(output));
-//   } else {
-//     optimized_integer_ops::FullyConnected(
-//         op_params, GetTensorShape(input), GetTensorData<int8_t>(input),
-//         RuntimeShape(filter_dims_size, filter_dims_data), filter_data,
-//         RuntimeShape(bias_dims_size, bias_dims_data), bias_data,
-//         GetTensorShape(output), GetTensorData<int8_t>(output),
-//         cpu_backend_context);
-//   }
-// }
+    tasks.emplace_back(context, node, params, data, input, filter, bias,
+                       thread_start, thread_end, input_quantized,
+                       scaling_factors, accum_scratch, row_sums, input_offsets,
+                       output);
+    thread_start = thread_end;
+  }
+  cpu_backend_threadpool::Execute(tasks.size(), tasks.data(),
+                                  cpu_backend_context);
+  return kTfLiteOk;
+}
 
-// template <KernelType kernel_type>
-// void FullyConnectedInt16(const OpData* data, const TfLiteTensor* input,
-//                          const TfLiteTensor* filter, const TfLiteTensor* bias,
-//                          TfLiteTensor* output) {
-//   FullyConnectedParams op_params;
-//   op_params.weights_offset = -filter->params.zero_point;
-//   op_params.output_multiplier = data->output_multiplier;
-//   op_params.output_shift = data->output_shift;
-//   op_params.quantized_activation_min = data->output_activation_min;
-//   op_params.quantized_activation_max = data->output_activation_max;
-//   if (bias && bias->type == kTfLiteInt64) {
-//     // const int8_t* filter_data;
-//     // filter_data = filter_raw;
-//     // const int64_t* bias_data;
-//     // bias_data = bias_raw;
-//     reference_integer_ops::FullyConnected(
-//         op_params, GetTensorShape(input), GetTensorData<int16_t>(input),
-//         RuntimeShape(filter_dims_size, filter_dims_data), filter_data,
-//         RuntimeShape(bias_dims_size, bias_dims_data), bias_data,
-//         GetTensorShape(output), GetTensorData<int16_t>(output));
-//   } else {
-//     // const int8_t* filter_data;
-//     // filter_data = filter_raw;
-//     // const int32_t* bias_data;
-//     // bias_data = bias_raw;
-//     reference_integer_ops::FullyConnected(
-//         op_params, GetTensorShape(input), GetTensorData<int16_t>(input),
-//         RuntimeShape(filter_dims_size, filter_dims_data), filter_data,
-//         RuntimeShape(bias_dims_size, bias_dims_data), bias_data,
-//         GetTensorShape(output), GetTensorData<int16_t>(output));
-//   }
-// }
-// }  // namespace
+namespace {
+template <KernelType kernel_type>
+void FullyConnectedInt8(const OpData* data, const TfLiteTensor* input,
+                        const TfLiteTensor* filter, const TfLiteTensor* bias,
+                        TfLiteTensor* output,
+                        CpuBackendContext* cpu_backend_context) {
+  FullyConnectedParams op_params;
+  op_params.input_offset = -input->params.zero_point;
+  op_params.weights_offset = -filter->params.zero_point;
+  op_params.output_offset = output->params.zero_point;
+  op_params.output_multiplier = data->output_multiplier;
+  op_params.output_shift = data->output_shift;
+  op_params.quantized_activation_min = data->output_activation_min;
+  op_params.quantized_activation_max = data->output_activation_max;
+  op_params.lhs_cacheable = IsConstantTensor(filter);
+  op_params.rhs_cacheable = IsConstantTensor(input);
+  if (kernel_type == kReference) {
+    reference_integer_ops::FullyConnected(
+        op_params, GetTensorShape(input), GetTensorData<int8_t>(input),
+        GetTensorShape(filter), GetTensorData<int8_t>(filter),
+        GetTensorShape(bias), GetTensorData<int32_t>(bias),
+        GetTensorShape(output), GetTensorData<int8_t>(output));
+  } else {
+    optimized_integer_ops::FullyConnected(
+        op_params, GetTensorShape(input), GetTensorData<int8_t>(input),
+        GetTensorShape(filter), GetTensorData<int8_t>(filter),
+        GetTensorShape(bias), GetTensorData<int32_t>(bias),
+        GetTensorShape(output), GetTensorData<int8_t>(output),
+        cpu_backend_context);
+  }
+}
+
+template <KernelType kernel_type>
+void FullyConnectedInt16(const OpData* data, const TfLiteTensor* input,
+                         const TfLiteTensor* filter, const TfLiteTensor* bias,
+                         TfLiteTensor* output) {
+  FullyConnectedParams op_params;
+  op_params.weights_offset = -filter->params.zero_point;
+  op_params.output_multiplier = data->output_multiplier;
+  op_params.output_shift = data->output_shift;
+  op_params.quantized_activation_min = data->output_activation_min;
+  op_params.quantized_activation_max = data->output_activation_max;
+  if (bias && bias->type == kTfLiteInt64) {
+    reference_integer_ops::FullyConnected(
+        op_params, GetTensorShape(input), GetTensorData<int16_t>(input),
+        GetTensorShape(filter), GetTensorData<int8_t>(filter),
+        GetTensorShape(bias), GetTensorData<int64_t>(bias),
+        GetTensorShape(output), GetTensorData<int16_t>(output));
+  } else {
+    reference_integer_ops::FullyConnected(
+        op_params, GetTensorShape(input), GetTensorData<int16_t>(input),
+        GetTensorShape(filter), GetTensorData<int8_t>(filter),
+        GetTensorShape(bias), GetTensorData<int32_t>(bias),
+        GetTensorShape(output), GetTensorData<int16_t>(output));
+  }
+}
+}  // namespace
 
 // Verifies that sparsity values are valid given input/weight/output.
 bool VerifySparsity(const RuntimeShape& weights_shape,
@@ -846,224 +941,200 @@ bool VerifySparsity(const RuntimeShape& weights_shape,
   return true;
 }
 
-// template <KernelType kernel_type>
-// TfLiteStatus EvalQuantized(TfLiteContext* context, TfLiteNode* node,
-//                            TfLiteFullyConnectedParams* params, OpData* data,
-//                            const TfLiteTensor* input,
-//                            const TfLiteTensor* filter, const TfLiteTensor* bias,
-//                            TfLiteTensor* output) {
-//   int32_t input_offset = -input->params.zero_point;
-//   int32_t filter_offset = -filter->params.zero_point;
-//   int32_t output_offset = output->params.zero_point;
-//   // Only the Pie path supports quantized models and float inputs/outputs.
-//   if (input->type == kTfLiteFloat32) {
-//     TfLiteTensor* input_quantized;
-//     TF_LITE_ENSURE_OK(context, GetTemporarySafe(context, node, /*index=*/0,
-//                                                 &input_quantized));
-//     TfLiteTensor* scaling_factors;
-//     TF_LITE_ENSURE_OK(context, GetTemporarySafe(context, node, /*index=*/1,
-//                                                 &scaling_factors));
-//     TfLiteTensor* accum_scratch;
-//     TF_LITE_ENSURE_OK(
-//         context, GetTemporarySafe(context, node, /*index=*/2, &accum_scratch));
-//     TfLiteTensor* input_offsets;
-//     TF_LITE_ENSURE_OK(
-//         context, GetTemporarySafe(context, node, /*index=*/3, &input_offsets));
-//     TfLiteTensor* row_sums;
-//     TF_LITE_ENSURE_OK(context,
-//                       GetTemporarySafe(context, node, /*index=*/4, &row_sums));
-//     return EvalHybrid(context, node, params, data, input, filter, bias,
-//                       input_quantized, scaling_factors, accum_scratch, row_sums,
-//                       input_offsets, output);
-//   } else {
-//     FullyConnectedParams op_params;
-//     op_params.input_offset = input_offset;
-//     op_params.weights_offset = filter_offset;
-//     op_params.output_offset = output_offset;
-//     op_params.output_multiplier = data->output_multiplier;
-//     op_params.output_shift = data->output_shift;
-//     op_params.quantized_activation_min = data->output_activation_min;
-//     op_params.quantized_activation_max = data->output_activation_max;
-//     op_params.lhs_cacheable = true;
-//     op_params.rhs_cacheable = IsConstantTensor(input);
-//     switch (output->type) {
-//       case kTfLiteUInt8:
-//         // const uint8_t* filter_data;
-//         // filter_data = filter_raw;
-//         // const int32_t* bias_data;
-//         // bias_data = bias_raw;
-//         if (kernel_type == kReference) {
-//           reference_ops::FullyConnected(
-//               op_params, GetTensorShape(input), GetTensorData<uint8_t>(input),
-//               RuntimeShape(filter_dims_size, filter_dims_data), filter_data,
-//               RuntimeShape(bias_dims_size, bias_dims_data), bias_data,
-//               GetTensorShape(output), GetTensorData<uint8_t>(output));
-//         } else {
-//           optimized_ops::FullyConnected(
-//               op_params, GetTensorShape(input), GetTensorData<uint8_t>(input),
-//               RuntimeShape(filter_dims_size, filter_dims_data), filter_data,
-//               RuntimeShape(bias_dims_size, bias_dims_data), bias_data,
-//               GetTensorShape(output), GetTensorData<uint8_t>(output),
-//               CpuBackendContext::GetFromContext(context));
-//         }
-//         break;
-//       case kTfLiteInt8:
-//         // const int8_t* filter_data;
-//         // filter_data = filter_raw;
-//         // const int32_t* bias_data;
-//         // bias_data = bias_raw;
-//         if (is_sparse) {
-//           const TfLiteSparsity& sparsity = *filter->sparsity;
-//           const auto input_shape = GetTensorShape(input);
-//           const auto filter_shape = RuntimeShape(filter_dims_size, filter_dims_data);
-//           const auto output_shape = GetTensorShape(output);
-//           const auto bias_shape = RuntimeShape(bias_dims_size, bias_dims_data);
-//           if (filter_offset != 0) {
-//             TF_LITE_KERNEL_LOG(context,
-//                                "Quantized and sparse fully-connected format "
-//                                "supports symmetric weight quantization only.");
-//             return kTfLiteError;
-//           }
-//           if (!SupportedSparsityFormat(sparsity) ||
-//               !VerifySparsity(filter_shape, input_shape, output_shape,
-//                               &sparsity)) {
-//             TF_LITE_KERNEL_LOG(
-//                 context,
-//                 "Invalid quantized and sparse fully-connected format.");
-//             return kTfLiteError;
-//           }
-//           if (sparsity.dim_metadata_size == kDimMetadataSizeBlockSparse &&
-//               sparsity.dim_metadata[2].dense_size == 16) {
-//             // Block sparse with block size of 1x16.
-//             optimized_ops::FullyConnectedSparseWeight1x16(
-//                 sparsity, op_params, input_shape, GetTensorData<int8_t>(input),
-//                 filter_shape, GetTensorData<int8_t>(filter), bias_shape,
-//                 GetTensorData<int32_t>(bias), output_shape,
-//                 GetTensorData<int8_t>(output),
-//                 CpuBackendContext::GetFromContext(context));
-//           } else {
-//             TF_LITE_KERNEL_LOG(
-//                 context, "Unsupported sparse fully-connected weight format.");
-//             return kTfLiteError;
-//           }
-//         } else {
-//           FullyConnectedInt8<kernel_type>(
-//               data, input, filter, bias, output,
-//               CpuBackendContext::GetFromContext(context));
-//         }
-//         break;
-//       case kTfLiteInt16:
-//         if (input->type == kTfLiteInt16) {
-//           // const int8_t* filter_data;
-//           // filter_data = filter_raw;
-//           // const int32_t* bias_data;
-//           // bias_data = bias_raw;
-//           // To avoid 32bit accum overflow, it enables RUY only
-//           // when zero_point is 0.
-//           bool has_non_zero_point = input->params.zero_point ||
-//                                     filter->params.zero_point ||
-//                                     output->params.zero_point;
-//           if (kernel_type == kReference || has_non_zero_point ||
-//               (bias && bias->type == kTfLiteInt64)) {
-//             FullyConnectedInt16<kernel_type>(data, input, filter, bias, output);
-//           } else {
-//             optimized_integer_ops::FullyConnected(
-//                 op_params, GetTensorShape(input), GetTensorData<int16_t>(input),
-//                 RuntimeShape(filter_dims_size, filter_dims_data), filter_data,
-//                 RuntimeShape(bias_dims_size, bias_dims_data), bias_data,
-//                 GetTensorShape(output), GetTensorData<int16_t>(output),
-//                 CpuBackendContext::GetFromContext(context));
-//           }
-//         } else if (kernel_type == kReference) {
-//           // const uint8_t* filter_data;
-//           // filter_data = filter_raw;
-//           // const int32_t* bias_data;
-//           // bias_data = bias_raw;
-//           reference_ops::FullyConnected(
-//               op_params, GetTensorShape(input), GetTensorData<uint8_t>(input),
-//               RuntimeShape(filter_dims_size, filter_dims_data), filter_data,
-//               RuntimeShape(bias_dims_size, bias_dims_data), bias_data,
-//               GetTensorShape(output), GetTensorData<int16_t>(output));
-//         } else {
-//           // const uint8_t* filter_data;
-//           // auto* filter_data = filter_raw;
-//           // const int32_t* bias_data;
-//           // auto* bias_data = bias_raw;
-//           optimized_ops::FullyConnected(
-//               op_params, GetTensorShape(input), GetTensorData<uint8_t>(input),
-//               RuntimeShape(filter_dims_size, filter_dims_data), filter_data,
-//               RuntimeShape(bias_dims_size, bias_dims_data), bias_data,
-//               GetTensorShape(output), GetTensorData<int16_t>(output),
-//               CpuBackendContext::GetFromContext(context));
-//         }
-//         break;
-//       default:
-//         context->ReportError(context,
-//                              "Quantized FullyConnected expects output data "
-//                              "type uint8, int8 or int16");
-//         return kTfLiteError;
-//     }
-//   }
+template <KernelType kernel_type>
+TfLiteStatus EvalQuantized(TfLiteContext* context, TfLiteNode* node,
+                           TfLiteFullyConnectedParams* params, OpData* data,
+                           const TfLiteTensor* input,
+                           const TfLiteTensor* filter, const TfLiteTensor* bias,
+                           TfLiteTensor* output) {
+  int32_t input_offset = -input->params.zero_point;
+  int32_t filter_offset = -filter->params.zero_point;
+  int32_t output_offset = output->params.zero_point;
+  // Only the Pie path supports quantized models and float inputs/outputs.
+  if (input->type == kTfLiteFloat32) {
+    TfLiteTensor* input_quantized;
+    TF_LITE_ENSURE_OK(context, GetTemporarySafe(context, node, /*index=*/0,
+                                                &input_quantized));
+    TfLiteTensor* scaling_factors;
+    TF_LITE_ENSURE_OK(context, GetTemporarySafe(context, node, /*index=*/1,
+                                                &scaling_factors));
+    TfLiteTensor* accum_scratch;
+    TF_LITE_ENSURE_OK(
+        context, GetTemporarySafe(context, node, /*index=*/2, &accum_scratch));
+    TfLiteTensor* input_offsets;
+    TF_LITE_ENSURE_OK(
+        context, GetTemporarySafe(context, node, /*index=*/3, &input_offsets));
+    TfLiteTensor* row_sums;
+    TF_LITE_ENSURE_OK(context,
+                      GetTemporarySafe(context, node, /*index=*/4, &row_sums));
+    return EvalHybrid(context, node, params, data, input, filter, bias,
+                      input_quantized, scaling_factors, accum_scratch, row_sums,
+                      input_offsets, output);
+  } else {
+    FullyConnectedParams op_params;
+    op_params.input_offset = input_offset;
+    op_params.weights_offset = filter_offset;
+    op_params.output_offset = output_offset;
+    op_params.output_multiplier = data->output_multiplier;
+    op_params.output_shift = data->output_shift;
+    op_params.quantized_activation_min = data->output_activation_min;
+    op_params.quantized_activation_max = data->output_activation_max;
+    op_params.lhs_cacheable = IsConstantTensor(filter);
+    op_params.rhs_cacheable = IsConstantTensor(input);
+    switch (output->type) {
+      case kTfLiteUInt8:
+        if (kernel_type == kReference) {
+          reference_ops::FullyConnected(
+              op_params, GetTensorShape(input), GetTensorData<uint8_t>(input),
+              GetTensorShape(filter), GetTensorData<uint8_t>(filter),
+              GetTensorShape(bias), GetTensorData<int32_t>(bias),
+              GetTensorShape(output), GetTensorData<uint8_t>(output));
+        } else {
+          optimized_ops::FullyConnected(
+              op_params, GetTensorShape(input), GetTensorData<uint8_t>(input),
+              GetTensorShape(filter), GetTensorData<uint8_t>(filter),
+              GetTensorShape(bias), GetTensorData<int32_t>(bias),
+              GetTensorShape(output), GetTensorData<uint8_t>(output),
+              CpuBackendContext::GetFromContext(context));
+        }
+        break;
+      case kTfLiteInt8:
+        if (filter->sparsity != nullptr) {
+          const TfLiteSparsity& sparsity = *filter->sparsity;
+          const auto input_shape = GetTensorShape(input);
+          const auto filter_shape = GetTensorShape(filter);
+          const auto output_shape = GetTensorShape(output);
+          const auto bias_shape = GetTensorShape(bias);
+          if (filter_offset != 0) {
+            TF_LITE_KERNEL_LOG(context,
+                               "Quantized and sparse fully-connected format "
+                               "supports symmetric weight quantization only.");
+            return kTfLiteError;
+          }
+          if (!SupportedSparsityFormat(sparsity) ||
+              !VerifySparsity(filter_shape, input_shape, output_shape,
+                              &sparsity)) {
+            TF_LITE_KERNEL_LOG(
+                context,
+                "Invalid quantized and sparse fully-connected format.");
+            return kTfLiteError;
+          }
+          if (sparsity.dim_metadata_size == kDimMetadataSizeBlockSparse &&
+              sparsity.dim_metadata[2].dense_size == 16) {
+            // Block sparse with block size of 1x16.
+            optimized_ops::FullyConnectedSparseWeight1x16(
+                sparsity, op_params, input_shape, GetTensorData<int8_t>(input),
+                filter_shape, GetTensorData<int8_t>(filter), bias_shape,
+                GetTensorData<int32_t>(bias), output_shape,
+                GetTensorData<int8_t>(output),
+                CpuBackendContext::GetFromContext(context));
+          } else {
+            TF_LITE_KERNEL_LOG(
+                context, "Unsupported sparse fully-connected weight format.");
+            return kTfLiteError;
+          }
+        } else {
+          FullyConnectedInt8<kernel_type>(
+              data, input, filter, bias, output,
+              CpuBackendContext::GetFromContext(context));
+        }
+        break;
+      case kTfLiteInt16:
+        if (input->type == kTfLiteInt16) {
+          // To avoid 32bit accum overflow, it enables RUY only
+          // when zero_point is 0.
+          bool has_non_zero_point = input->params.zero_point ||
+                                    filter->params.zero_point ||
+                                    output->params.zero_point;
+          if (kernel_type == kReference || has_non_zero_point ||
+              (bias && bias->type == kTfLiteInt64)) {
+            FullyConnectedInt16<kernel_type>(data, input, filter, bias, output);
+          } else {
+            optimized_integer_ops::FullyConnected(
+                op_params, GetTensorShape(input), GetTensorData<int16_t>(input),
+                GetTensorShape(filter), GetTensorData<int8_t>(filter),
+                GetTensorShape(bias), GetTensorData<int32_t>(bias),
+                GetTensorShape(output), GetTensorData<int16_t>(output),
+                CpuBackendContext::GetFromContext(context));
+          }
+        } else if (kernel_type == kReference) {
+          reference_ops::FullyConnected(
+              op_params, GetTensorShape(input), GetTensorData<uint8_t>(input),
+              GetTensorShape(filter), GetTensorData<uint8_t>(filter),
+              GetTensorShape(bias), GetTensorData<int32_t>(bias),
+              GetTensorShape(output), GetTensorData<int16_t>(output));
+        } else {
+          optimized_ops::FullyConnected(
+              op_params, GetTensorShape(input), GetTensorData<uint8_t>(input),
+              GetTensorShape(filter), GetTensorData<uint8_t>(filter),
+              GetTensorShape(bias), GetTensorData<int32_t>(bias),
+              GetTensorShape(output), GetTensorData<int16_t>(output),
+              CpuBackendContext::GetFromContext(context));
+        }
+        break;
+      default:
+        context->ReportError(context,
+                             "Quantized FullyConnected expects output data "
+                             "type uint8, int8 or int16");
+        return kTfLiteError;
+    }
+  }
 
-//   return kTfLiteOk;
-// }
+  return kTfLiteOk;
+}
 
-// template <KernelType kernel_type>
-// TfLiteStatus EvalShuffledQuantized(TfLiteContext* context, TfLiteNode* node,
-//                                    TfLiteFullyConnectedParams* params,
-//                                    OpData* data, const TfLiteTensor* input,
-//                                    const TfLiteTensor* filter,
-//                                    const TfLiteTensor* bias,
-//                                    TfLiteTensor* output,
-//                                    TfLiteTensor* shuffled_input_workspace) {
-//   // TODO(b/110697972) decide more consistently if / how / where we want
-//   // to perform this kind of runtime data type checks.
-//   if (shuffled_input_workspace->type != kTfLiteUInt8) {
-//     context->ReportError(context, "Unexpected data type");
-//     return kTfLiteError;
-//   }
+template <KernelType kernel_type>
+TfLiteStatus EvalShuffledQuantized(TfLiteContext* context, TfLiteNode* node,
+                                   TfLiteFullyConnectedParams* params,
+                                   OpData* data, const TfLiteTensor* input,
+                                   const TfLiteTensor* filter,
+                                   const TfLiteTensor* bias,
+                                   TfLiteTensor* output,
+                                   TfLiteTensor* shuffled_input_workspace) {
+  // TODO(b/110697972) decide more consistently if / how / where we want
+  // to perform this kind of runtime data type checks.
+  if (shuffled_input_workspace->type != kTfLiteUInt8) {
+    context->ReportError(context, "Unexpected data type");
+    return kTfLiteError;
+  }
 
-//   // const uint8_t* filter_data;
-//   // auto* filter_data = filter_raw;
-//   // const int32_t* bias_data;
-//   // auto* bias_data = bias_raw;
-// #define TF_LITE_SHUFFLED_FULLY_CONNECTED(type)                           \
-//   {                                                                      \
-//     type::ShuffledFullyConnected(                                        \
-//         op_params, GetTensorShape(input), GetTensorData<uint8_t>(input), \
-//         RuntimeShape(filter_dims_size, filter_dims_data), filter_data,   \
-//         RuntimeShape(bias_dims_size, bias_dims_data), bias_data,         \
-//         GetTensorShape(output), GetTensorData<int16_t>(output),          \
-//         GetTensorData<uint8_t>(shuffled_input_workspace),                \
-//         CpuBackendContext::GetFromContext(context));                     \
-//   }
-//   FullyConnectedParams op_params;
-//   op_params.output_multiplier = data->output_multiplier;
-//   op_params.output_shift = data->output_shift;
-//   op_params.quantized_activation_min = data->output_activation_min;
-//   op_params.quantized_activation_max = data->output_activation_max;
-//   op_params.lhs_cacheable = true;
-//   op_params.rhs_cacheable = IsConstantTensor(input);
-//   if (kernel_type == kReference) {
-//     reference_ops::ShuffledFullyConnected(
-//         op_params, GetTensorShape(input), GetTensorData<uint8_t>(input),
-//         RuntimeShape(filter_dims_size, filter_dims_data), filter_data,
-//         RuntimeShape(bias_dims_size, bias_dims_data), bias_data,
-//         GetTensorShape(output), GetTensorData<int16_t>(output),
-//         GetTensorData<uint8_t>(shuffled_input_workspace));
-//   } else {
-//     optimized_ops::ShuffledFullyConnected(
-//         op_params, GetTensorShape(input), GetTensorData<uint8_t>(input),
-//         RuntimeShape(filter_dims_size, filter_dims_data), filter_data,
-//         RuntimeShape(bias_dims_size, bias_dims_data), bias_data,
-//         GetTensorShape(output), GetTensorData<int16_t>(output),
-//         GetTensorData<uint8_t>(shuffled_input_workspace),
-//         CpuBackendContext::GetFromContext(context));
-//   }
-// #undef TF_LITE_SHUFFLED_FULLY_CONNECTED
+#define TF_LITE_SHUFFLED_FULLY_CONNECTED(type)                           \
+  {                                                                      \
+    type::ShuffledFullyConnected(                                        \
+        op_params, GetTensorShape(input), GetTensorData<uint8_t>(input), \
+        GetTensorShape(filter), GetTensorData<uint8_t>(filter),          \
+        GetTensorShape(bias), GetTensorData<int32_t>(bias),              \
+        GetTensorShape(output), GetTensorData<int16_t>(output),          \
+        GetTensorData<uint8_t>(shuffled_input_workspace),                \
+        CpuBackendContext::GetFromContext(context));                     \
+  }
+  FullyConnectedParams op_params;
+  op_params.output_multiplier = data->output_multiplier;
+  op_params.output_shift = data->output_shift;
+  op_params.quantized_activation_min = data->output_activation_min;
+  op_params.quantized_activation_max = data->output_activation_max;
+  op_params.lhs_cacheable = IsConstantTensor(filter);
+  op_params.rhs_cacheable = IsConstantTensor(input);
+  if (kernel_type == kReference) {
+    reference_ops::ShuffledFullyConnected(
+        op_params, GetTensorShape(input), GetTensorData<uint8_t>(input),
+        GetTensorShape(filter), GetTensorData<uint8_t>(filter),
+        GetTensorShape(bias), GetTensorData<int32_t>(bias),
+        GetTensorShape(output), GetTensorData<int16_t>(output),
+        GetTensorData<uint8_t>(shuffled_input_workspace));
+  } else {
+    optimized_ops::ShuffledFullyConnected(
+        op_params, GetTensorShape(input), GetTensorData<uint8_t>(input),
+        GetTensorShape(filter), GetTensorData<uint8_t>(filter),
+        GetTensorShape(bias), GetTensorData<int32_t>(bias),
+        GetTensorShape(output), GetTensorData<int16_t>(output),
+        GetTensorData<uint8_t>(shuffled_input_workspace),
+        CpuBackendContext::GetFromContext(context));
+  }
+#undef TF_LITE_SHUFFLED_FULLY_CONNECTED
 
-//   return kTfLiteOk;
-// }
+  return kTfLiteOk;
+}
 
 template <KernelType kernel_type>
 TfLiteStatus EvalFloat(TfLiteContext* context, TfLiteNode* node,
@@ -1071,25 +1142,25 @@ TfLiteStatus EvalFloat(TfLiteContext* context, TfLiteNode* node,
                        const TfLiteTensor* input, const TfLiteTensor* filter,
                        const TfLiteTensor* bias, TfLiteTensor* output) {
   float output_activation_min, output_activation_max;
-  CalculateActivationRange(activation, &output_activation_min,
+  CalculateActivationRange(params->activation, &output_activation_min,
                            &output_activation_max);
   if (kernel_type == kReference) {
     FullyConnectedParams op_params;
     op_params.float_activation_min = output_activation_min;
     op_params.float_activation_max = output_activation_max;
-    if (is_sparse) {
+    if (filter->sparsity != nullptr) {
       const auto& sparsity = *filter->sparsity;
       reference_ops::FullyConnectedSparseWeight(
           sparsity, op_params, GetTensorShape(input),
-          GetTensorData<float>(input), RuntimeShape(filter_dims_size, filter_dims_data),
-          filter_data, RuntimeShape(bias_dims_size, bias_dims_data),
-          bias_data, GetTensorShape(output),
+          GetTensorData<float>(input), GetTensorShape(filter),
+          GetTensorData<float>(filter), GetTensorShape(bias),
+          GetTensorData<float>(bias), GetTensorShape(output),
           GetTensorData<float>(output));
     } else {
       reference_ops::FullyConnected(
           op_params, GetTensorShape(input), GetTensorData<float>(input),
-          RuntimeShape(filter_dims_size, filter_dims_data), filter_data,
-          RuntimeShape(bias_dims_size, bias_dims_data), bias_data,
+          GetTensorShape(filter), GetTensorData<float>(filter),
+          GetTensorShape(bias), GetTensorData<float>(bias),
           GetTensorShape(output), GetTensorData<float>(output));
     }
   } else if (kernel_type == kLegacyPie) {
@@ -1098,7 +1169,7 @@ TfLiteStatus EvalFloat(TfLiteContext* context, TfLiteNode* node,
     FullyConnectedParams op_params;
     op_params.float_activation_min = output_activation_min;
     op_params.float_activation_max = output_activation_max;
-    if (is_sparse) {
+    if (filter->sparsity != nullptr) {
       const auto& sparsity = *filter->sparsity;
       if (!SupportedSparsityFormat(sparsity)) {
         TF_LITE_KERNEL_LOG(context,
@@ -1106,9 +1177,9 @@ TfLiteStatus EvalFloat(TfLiteContext* context, TfLiteNode* node,
         return kTfLiteError;
       }
       const auto& input_shape = GetTensorShape(input);
-      const auto& filter_shape = RuntimeShape(filter_dims_size, filter_dims_data);
+      const auto& filter_shape = GetTensorShape(filter);
       const auto& output_shape = GetTensorShape(output);
-      const auto& bias_shape = RuntimeShape(bias_dims_size, bias_dims_data);
+      const auto& bias_shape = GetTensorShape(bias);
       if (!VerifySparsity(filter_shape, input_shape, output_shape, &sparsity)) {
         TF_LITE_KERNEL_LOG(context, "Invalid sparse fully-connected format.");
         return kTfLiteError;
@@ -1119,8 +1190,8 @@ TfLiteStatus EvalFloat(TfLiteContext* context, TfLiteNode* node,
         optimized_ops::FullyConnectedSparseWeight(
             sparsity, op_params,                         // Disable formatting
             input_shape, GetTensorData<float>(input),    // Disable formatting
-            filter_shape, filter_data,  // Disable formatting
-            bias_shape, bias_data,      // Disable formatting
+            filter_shape, GetTensorData<float>(filter),  // Disable formatting
+            bias_shape, GetTensorData<float>(bias),      // Disable formatting
             output_shape, GetTensorData<float>(output));
       } else if (sparsity.dim_metadata_size == kDimMetadataSizeBlockSparse &&
                  sparsity.dim_metadata[2].dense_size == 4) {
@@ -1128,8 +1199,8 @@ TfLiteStatus EvalFloat(TfLiteContext* context, TfLiteNode* node,
         optimized_ops::FullyConnectedSparseWeight1x4(
             sparsity, op_params,                         // Disable formatting
             input_shape, GetTensorData<float>(input),    // Disable formatting
-            filter_shape, filter_data,  // Disable formatting
-            bias_shape, bias_data,      // Disable formatting
+            filter_shape, GetTensorData<float>(filter),  // Disable formatting
+            bias_shape, GetTensorData<float>(bias),      // Disable formatting
             output_shape, GetTensorData<float>(output),
             CpuBackendContext::GetFromContext(context));
       } else {
@@ -1139,12 +1210,12 @@ TfLiteStatus EvalFloat(TfLiteContext* context, TfLiteNode* node,
       }
 
     } else {
-      op_params.lhs_cacheable = true;
+      op_params.lhs_cacheable = IsConstantTensor(filter);
       op_params.rhs_cacheable = IsConstantTensor(input);
       optimized_ops::FullyConnected(
           op_params, GetTensorShape(input), GetTensorData<float>(input),
-          RuntimeShape(filter_dims_size, filter_dims_data), filter_data,
-          RuntimeShape(bias_dims_size, bias_dims_data), bias_data,
+          GetTensorShape(filter), GetTensorData<float>(filter),
+          GetTensorShape(bias), GetTensorData<float>(bias),
           GetTensorShape(output), GetTensorData<float>(output),
           CpuBackendContext::GetFromContext(context));
     }
@@ -1158,14 +1229,66 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   // auto* params =
   //     reinterpret_cast<TfLiteFullyConnectedParams*>(node->builtin_data);
   TfLiteFullyConnectedParams* params;
+  TfLiteFullyConnectedParams data_params = ExtractFullyConnectedParams(
+                               weights_format, keep_num_dims,
+                               asymmetric_quantize_inputs, activation);
+  params = &data_params;
+
   OpData* data = reinterpret_cast<OpData*>(node->user_data);
 
   const TfLiteTensor* input;
   TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, kInputTensor, &input));
-  const TfLiteTensor* filter;
+  // const TfLiteTensor* filter;
   // TF_LITE_ENSURE_OK(context,
   //                   GetInputSafe(context, node, kWeightsTensor, &filter));
-  const TfLiteTensor* bias = nullptr;
+
+  TfLiteTensor filter_tensor;
+  TfLiteIntArray* filter_dims_data = TfLiteIntArrayCreate(filter_dims_size);
+  int size_filter = 1;
+  for (int i = 0; i < filter_dims_size; i++) {
+    // std::cout << "dims_raw: " << dims_raw[i] << std::endl;
+    filter_dims_data->data[i] = filter_dims_raw[i];
+    size_filter *= filter_dims_raw[i];
+  }
+  size_t bytes_size_filter = sizeof(float) * size_filter;
+  TfLiteQuantizationParams filter_params;
+  filter_params.scale=scale_filter;
+  filter_params.zero_point=zero_point_filter;
+  float* filter_data;
+  filter_data = filter_raw;
+  GetFullyConnectedTensor(filter_type, "filter", filter_dims_data,
+                       filter_params, filter_data, 
+                       bytes_size_filter, &filter_tensor);
+  const TfLiteTensor* filter = &filter_tensor;
+
+  // const TfLiteTensor* bias =
+  //     (node->inputs->size == 3)
+  //         ? GetOptionalInputTensor(context, node, kBiasTensor)
+  //         : nullptr;
+  TfLiteTensor bias_tensor;
+  const TfLiteTensor* bias;
+  if (has_conv_bias) {
+    TfLiteIntArray* bias_dims_data = TfLiteIntArrayCreate(bias_dims_size);
+    int size_bias = 1;
+    for (int i = 0; i < bias_dims_size; i++) {
+      // std::cout << "dims_raw: " << dims_raw[i] << std::endl;
+      bias_dims_data->data[i] = bias_dims_raw[i];
+      size_bias *= bias_dims_raw[i];
+    }
+    size_t bytes_size_bias = sizeof(float) * size_bias;
+    TfLiteQuantizationParams bias_params;
+    bias_params.scale=scale_bias;
+    bias_params.zero_point=zero_point_bias;
+    float* bias_data;
+    bias_data = bias_raw;
+    GetFullyConnectedTensor(bias_type, "bias", bias_dims_data,
+                        bias_params, bias_data, 
+                        bytes_size_bias, &bias_tensor);
+    bias = &bias_tensor;
+  } else {
+    bias = nullptr;
+  }
+
   TfLiteTensor* output;
   TF_LITE_ENSURE_OK(context,
                     GetOutputSafe(context, node, kOutputTensor, &output));
@@ -1173,43 +1296,44 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   if (NumElements(output) == 0) {
     return kTfLiteOk;
   }
-  switch (filter_type) {
+
+  switch (filter->type) {
     case kTfLiteFloat32:
       return EvalFloat<kernel_type>(context, node, params, data, input, filter,
                                     bias, output);
-    // case kTfLiteUInt8:
-    //   if (weights_format ==
-    //       kTfLiteFullyConnectedWeightsFormatShuffled4x16Int8) {
-    //     TfLiteTensor* shuffled_input_workspace;
-    //     TF_LITE_ENSURE_OK(
-    //         context, GetOutputSafe(context, node, kShuffledInputWorkspaceTensor,
-    //                                &shuffled_input_workspace));
-    //     return EvalShuffledQuantized<kernel_type>(context, node, params, data,
-    //                                               input, filter, bias, output,
-    //                                               shuffled_input_workspace);
-    //   } else if (weights_format ==
-    //              kTfLiteFullyConnectedWeightsFormatDefault) {
-    //     return EvalQuantized<kernel_type>(context, node, params, data, input,
-    //                                       filter, bias, output);
-    //   } else {
-    //     context->ReportError(context,
-    //                          "Unhandled fully-connected weights format");
-    //     return kTfLiteError;
-    //   }
-    // case kTfLiteInt8:
-    //   if (weights_format == kTfLiteFullyConnectedWeightsFormatDefault) {
-    //     return EvalQuantized<kernel_type>(context, node, params, data, input,
-    //                                       filter, bias, output);
-    //   } else {
-    //     context->ReportError(context,
-    //                          "Unhandled fully-connected weights format");
-    //     return kTfLiteError;
-    //   }
-    // default:
-    //   context->ReportError(context,
-    //                        "Filter data type %s currently not supported.",
-    //                        TfLiteTypeGetName(filter_type));
-    //   return kTfLiteError;
+    case kTfLiteUInt8:
+      if (params->weights_format ==
+          kTfLiteFullyConnectedWeightsFormatShuffled4x16Int8) {
+        TfLiteTensor* shuffled_input_workspace;
+        TF_LITE_ENSURE_OK(
+            context, GetOutputSafe(context, node, kShuffledInputWorkspaceTensor,
+                                   &shuffled_input_workspace));
+        return EvalShuffledQuantized<kernel_type>(context, node, params, data,
+                                                  input, filter, bias, output,
+                                                  shuffled_input_workspace);
+      } else if (params->weights_format ==
+                 kTfLiteFullyConnectedWeightsFormatDefault) {
+        return EvalQuantized<kernel_type>(context, node, params, data, input,
+                                          filter, bias, output);
+      } else {
+        context->ReportError(context,
+                             "Unhandled fully-connected weights format");
+        return kTfLiteError;
+      }
+    case kTfLiteInt8:
+      if (params->weights_format == kTfLiteFullyConnectedWeightsFormatDefault) {
+        return EvalQuantized<kernel_type>(context, node, params, data, input,
+                                          filter, bias, output);
+      } else {
+        context->ReportError(context,
+                             "Unhandled fully-connected weights format");
+        return kTfLiteError;
+      }
+    default:
+      context->ReportError(context,
+                           "Filter data type %s currently not supported.",
+                           TfLiteTypeGetName(filter->type));
+      return kTfLiteError;
   }
   return kTfLiteOk;
 }
