@@ -24,7 +24,10 @@ def model_inference(interpreter, inputs):
     for i in range(len(inputs)):
         interpreter.set_tensor(input_details[0]["index"], np.expand_dims(inputs[i], 0))
         interpreter.invoke()
-        output = interpreter.get_tensor(output_details[0]['index'])
+        if i == 0:
+            output = interpreter.get_tensor(output_details[0]['index'])
+        else:
+            output = np.concatenate((output, interpreter.get_tensor(output_details[0]['index'])), axis=0)
     return output
 
 def model_test(model_path):
@@ -32,9 +35,7 @@ def model_test(model_path):
     # --------------------------------------------------
     # generate random data
     # --------------------------------------------------
-    inputs = generate_random_data(model_path, batch_size=1000)[0]
-    # print(inputs[0].shape)
-    x = tf.constant(np.expand_dims(inputs[0], 0), dtype=tf.float32)
+    inputs = generate_random_data(model_path, batch_size=100)[0]
 
     # --------------------------------------------------
     # get the output of the obfuscated model

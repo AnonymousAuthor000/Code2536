@@ -108,6 +108,14 @@ def get_attributes_params(op, interpreter):
             print("Warning: no paddings found and using default padding SAME")
         else:
             kwargs['paddings='] = 'paddings=' + conv_padding_parser(padding)
+        if len(op['inputs']) > 2:
+            kwargs['has_conv_bias='] = 'has_conv_bias=true'
+        else:
+            kwargs['has_conv_bias='] = 'has_conv_bias=false'
+            kwargs['const TfLiteType bias_type=;'] = ' '
+            kwargs['const int bias_dims_size=;'] = ' '
+            kwargs['const int32_t bias_dims_raw=;'] = ' '
+            kwargs['float bias_raw=;'] = ' '
 
         for tensor_details in interpreter.get_tensor_details():
             if tensor_details['index'] == op['inputs'][1]:
@@ -119,14 +127,10 @@ def get_attributes_params(op, interpreter):
                 filter_width = filter_tensor.shape[2]
                 filter_dims_raw = '{' + str(filter_output_channel) + ',' + str(filter_height)  + ',' + str(filter_width)  + ',' + str(filter_input_channel) +'}'
                 filter_dims_size = len(filter_tensor.shape)
-                kwargs['filter_input_channel='] = 'filter_input_channel=' + str(filter_input_channel)
-                kwargs['filter_output_channel='] = 'filter_output_channel=' + str(filter_output_channel)
-                kwargs['filter_height='] = 'filter_height=' + str(filter_height)
-                kwargs['filter_width='] = 'filter_width=' + str(filter_width)
                 kwargs['filter_dims_size='] = 'filter_dims_size=' + str(filter_dims_size)
                 kwargs['filter_dims_raw='] = 'filter_dims_raw[' + str(filter_dims_size) + ']=' + filter_dims_raw
                 kwargs['filter_type='] = 'filter_type=' + conv_filter_type_parser(filter_tensor.dtype)
-                kwargs['filter_raw='] = 'filter_raw[' + str(filter_item_num) + ']=' + '{' + str(np.transpose(filter_tensor, (1, 2, 3, 0)).flatten('C').tolist()).strip('[').strip(']') + '}'
+                kwargs['filter_raw='] = 'filter_raw[' + str(filter_item_num) + ']=' + '{' + str(filter_tensor.flatten('C').tolist()).strip('[').strip(']') + '}'
 
             elif tensor_details['index'] == op['inputs'][2]:
                 bias_tensor = interpreter.get_tensor(tensor_details["index"])
@@ -134,7 +138,7 @@ def get_attributes_params(op, interpreter):
                 bias_channel = bias_tensor.shape[0]
                 bias_dims_raw = '{' + str(bias_channel) + '}'
                 bias_dims_size = len(bias_tensor.shape)
-                kwargs['bias_channel='] = 'bias_channel=' + str(bias_channel)
+                kwargs['bias_type='] = 'bias_type=' + conv_filter_type_parser(bias_tensor.dtype)
                 kwargs['bias_dims_size='] = 'bias_dims_size=' + str(bias_dims_size)
                 kwargs['bias_dims_raw='] = 'bias_dims_raw[' + str(bias_dims_size) + ']=' + bias_dims_raw
                 kwargs['bias_raw='] = 'bias_raw[' + str(bias_item_num) + ']=' + '{' + str(bias_tensor.tolist()).strip('[').strip(']') + '}'
