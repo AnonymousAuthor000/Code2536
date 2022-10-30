@@ -35,7 +35,7 @@ def model_test(model_path):
     # --------------------------------------------------
     # generate random data
     # --------------------------------------------------
-    inputs = generate_random_data(model_path, batch_size=100)[0]
+    inputs = generate_random_data(model_path, batch_size=1000)[0]
 
     # --------------------------------------------------
     # get the output of the obfuscated model
