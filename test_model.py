@@ -66,8 +66,6 @@ def model_test(model_path):
     gc.collect()
 
     print('obfuscation error:', (output_obf.squeeze()-output_ori.squeeze()).mean())
-    print(output_obf.argmax(1))
-    print(output_ori.argmax(1))
 
 # --------------------------------------------------
 # test the obfuscated model
