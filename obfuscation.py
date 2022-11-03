@@ -76,6 +76,9 @@ model_json = json.loads(model_json_f)
 # op_details = interpreter._get_ops_details()
 # print(op_details)
 
+# for tensor_details in interpreter.get_tensor_details():
+#     print(tensor_details)
+
 random_shortcut(model_json)
 tensor_list = []
 for input in interpreter.get_input_details():
@@ -118,6 +121,42 @@ for op in jsontext['oplist']:
     # print("del:", del_list)
     for j in range(len(del_list)):
         op['input'].remove(del_list[j])
+    
+    out_node = op['output'][0]
+    try:
+        model_json['subgraphs'][0]["tensors"][out_node]["type"]
+    except:
+        op['type'] = "FLOAT32"
+    else:
+        op['type'] = model_json['subgraphs'][0]["tensors"][out_node]["type"]
+    try:
+        model_json['subgraphs'][0]["tensors"][out_node]["quantization"]
+    except:
+        op["quantization"] = {}
+    else:
+        op["quantization"] = model_json['subgraphs'][0]["tensors"][out_node]["quantization"]
+
+input_list = model_json['subgraphs'][0]['inputs']
+jsontext['inputs'] = []
+for i in range(len(input_list)):
+    try:
+        tensor_type = model_json['subgraphs'][0]["tensors"][input_list[i]]["type"]
+    except:
+        tensor_type = "FLOAT32"
+    else:
+        tensor_type = model_json['subgraphs'][0]["tensors"][input_list[i]]["type"]
+    jsontext['inputs'].append({'name': 'serving_default_x:'+str(i), 'type': tensor_type, 'quantization': model_json['subgraphs'][0]["tensors"][input_list[i]]["quantization"]})
+
+output_list = model_json['subgraphs'][0]['outputs']
+jsontext['outputs'] = []
+for i in range(len(output_list)):
+    try:
+        tensor_type = model_json['subgraphs'][0]["tensors"][input_list[i]]["type"]
+    except:
+        tensor_type = "FLOAT32"
+    else:
+        tensor_type = model_json['subgraphs'][0]["tensors"][input_list[i]]["type"]
+    jsontext['outputs'].append({'name': 'PartitionedCall:'+str(i), 'type': tensor_type, 'quantization': model_json['subgraphs'][0]["tensors"][output_list[i]]["quantization"]})
 
 jsondata = json.dumps(jsontext,indent=4,separators=(',', ': '))
 file = open('./ObfusedModel.json', 'w')

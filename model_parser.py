@@ -46,13 +46,15 @@ def conv_padding_parser(padding_name):
 
 def conv_filter_type_parser(filter_type):
     if filter_type == 'float32':
-        return 'kTfLiteFloat32'
+        return 'kTfLiteFloat32', 'float'
     elif filter_type == 'int8':
-        return 'kTfLiteInt8'
+        return 'kTfLiteInt8', 'int8_t'
     elif filter_type == 'uint8':
-        return 'kTfLiteUInt8'
-    elif filter_type == 'float16':
-        return 'kTfLiteFloat16'
+        return 'kTfLiteUInt8', 'uint8_t'
+    elif filter_type == 'int16':
+        return 'kTfLiteInt16', 'int16_t'
+    elif filter_type == 'int32':
+        return 'kTfLiteInt32', 'int32_t'
     else:
         raise TypeError('filter type ' + filter_type + ' not supported by conv layers')
 
@@ -127,10 +129,15 @@ def get_attributes_params(op, interpreter):
                 filter_width = filter_tensor.shape[2]
                 filter_dims_raw = '{' + str(filter_output_channel) + ',' + str(filter_height)  + ',' + str(filter_width)  + ',' + str(filter_input_channel) +'}'
                 filter_dims_size = len(filter_tensor.shape)
+                tflite_type, type_str = conv_filter_type_parser(filter_tensor.dtype)
+                quantization_filter = tensor_details['quantization']
                 kwargs['filter_dims_size='] = 'filter_dims_size=' + str(filter_dims_size)
                 kwargs['filter_dims_raw='] = 'filter_dims_raw[' + str(filter_dims_size) + ']=' + filter_dims_raw
-                kwargs['filter_type='] = 'filter_type=' + conv_filter_type_parser(filter_tensor.dtype)
-                kwargs['filter_raw='] = 'filter_raw[' + str(filter_item_num) + ']=' + '{' + str(filter_tensor.flatten('C').tolist()).strip('[').strip(']') + '}'
+                kwargs['filter_type='] = 'filter_type=' + tflite_type
+                kwargs['filter_raw='] = type_str + ' filter_raw[' + str(filter_item_num) + ']=' + '{' + str(filter_tensor.flatten('C').tolist()).strip('[').strip(']') + '}'
+                kwargs['scale_filter='] = 'scale_filter=' + str(quantization_filter[0])
+                kwargs['zero_point_filter='] = 'zero_point_filter=' + str(quantization_filter[1])
+                kwargs['filter_tensor_data=filter_raw'] = type_str + '* filter_tensor_data=filter_raw'
 
             elif tensor_details['index'] == op['inputs'][2]:
                 bias_tensor = interpreter.get_tensor(tensor_details["index"])
@@ -138,10 +145,15 @@ def get_attributes_params(op, interpreter):
                 bias_channel = bias_tensor.shape[0]
                 bias_dims_raw = '{' + str(bias_channel) + '}'
                 bias_dims_size = len(bias_tensor.shape)
-                kwargs['bias_type='] = 'bias_type=' + conv_filter_type_parser(bias_tensor.dtype)
+                tflite_type, type_str = conv_filter_type_parser(bias_tensor.dtype)
+                quantization_bias = tensor_details['quantization']
+                kwargs['bias_type='] = 'bias_type=' + tflite_type
                 kwargs['bias_dims_size='] = 'bias_dims_size=' + str(bias_dims_size)
                 kwargs['bias_dims_raw='] = 'bias_dims_raw[' + str(bias_dims_size) + ']=' + bias_dims_raw
-                kwargs['bias_raw='] = 'bias_raw[' + str(bias_item_num) + ']=' + '{' + str(bias_tensor.tolist()).strip('[').strip(']') + '}'
+                kwargs['bias_raw='] = type_str + ' bias_raw[' + str(bias_item_num) + ']=' + '{' + str(bias_tensor.tolist()).strip('[').strip(']') + '}'
+                kwargs['scale_bias='] = 'scale_bias=' + str(quantization_bias[0])
+                kwargs['zero_point_bias='] = 'zero_point_bias=' + str(quantization_bias[1])
+                kwargs['bias_tensor_data=bias_raw'] = type_str + '* bias_tensor_data=bias_raw'
     elif op['builtin_options_type'] == 'AveragePool2DOptions' or op['builtin_options_type'] == 'MaxPool2DOptions':
         try:
             stride_w = op['builtin_options']['stride_w']
@@ -247,10 +259,15 @@ def get_attributes_params(op, interpreter):
                 filter_output_channel = filter_tensor.shape[0]
                 filter_dims_raw = '{' + str(filter_output_channel) + ',' + str(filter_input_channel) +'}'
                 filter_dims_size = len(filter_tensor.shape)
+                tflite_type, type_str = conv_filter_type_parser(filter_tensor.dtype)
+                quantization_filter = tensor_details['quantization']
                 kwargs['filter_dims_size='] = 'filter_dims_size=' + str(filter_dims_size)
                 kwargs['filter_dims_raw='] = 'filter_dims_raw[' + str(filter_dims_size) + ']=' + filter_dims_raw
-                kwargs['filter_type='] = 'filter_type=' + conv_filter_type_parser(filter_tensor.dtype)
-                kwargs['filter_raw='] = 'filter_raw[' + str(filter_item_num) + ']=' + '{' + str(filter_tensor.flatten('C').tolist()).strip('[').strip(']') + '}'
+                kwargs['filter_type='] = 'filter_type=' + tflite_type
+                kwargs['filter_raw='] = type_str + ' filter_raw[' + str(filter_item_num) + ']=' + '{' + str(filter_tensor.flatten('C').tolist()).strip('[').strip(']') + '}'
+                kwargs['scale_filter='] = 'scale_filter=' + str(quantization_filter[0])
+                kwargs['zero_point_filter='] = 'zero_point_filter=' + str(quantization_filter[1])
+                kwargs['filter_tensor_data=filter_raw'] = type_str + '* filter_tensor_data=filter_raw'
 
             elif tensor_details['index'] == op['inputs'][2]:
                 bias_tensor = interpreter.get_tensor(tensor_details["index"])
@@ -258,10 +275,15 @@ def get_attributes_params(op, interpreter):
                 bias_channel = bias_tensor.shape[0]
                 bias_dims_raw = '{' + str(bias_channel) + '}'
                 bias_dims_size = len(bias_tensor.shape)
-                kwargs['bias_type='] = 'bias_type=' + conv_filter_type_parser(bias_tensor.dtype)
+                tflite_type, type_str = conv_filter_type_parser(bias_tensor.dtype)
+                quantization_bias = tensor_details['quantization']
+                kwargs['bias_type='] = 'bias_type=' + tflite_type
                 kwargs['bias_dims_size='] = 'bias_dims_size=' + str(bias_dims_size)
                 kwargs['bias_dims_raw='] = 'bias_dims_raw[' + str(bias_dims_size) + ']=' + bias_dims_raw
-                kwargs['bias_raw='] = 'bias_raw[' + str(bias_item_num) + ']=' + '{' + str(bias_tensor.tolist()).strip('[').strip(']') + '}'
+                kwargs['bias_raw='] = type_str + ' bias_raw[' + str(bias_item_num) + ']=' + '{' + str(bias_tensor.tolist()).strip('[').strip(']') + '}'
+                kwargs['scale_bias='] = 'scale_bias=' + str(quantization_bias[0])
+                kwargs['zero_point_bias='] = 'zero_point_bias=' + str(quantization_bias[1])
+                kwargs['bias_tensor_data=bias_raw'] = type_str + '* bias_tensor_data=bias_raw'
     elif op['builtin_options_type'] == 'AddOptions':
         try:
             activation = op['builtin_options']['fused_activation_function']

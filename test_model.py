@@ -35,7 +35,7 @@ def model_test(model_path):
     # --------------------------------------------------
     # generate random data
     # --------------------------------------------------
-    inputs = generate_random_data(model_path, batch_size=1000)[0]
+    inputs = generate_random_data(model_path, batch_size=100)[0]
 
     # --------------------------------------------------
     # get the output of the obfuscated model
@@ -65,7 +65,9 @@ def model_test(model_path):
     print('ori time cost: ',time_end-time_start,'s')
     gc.collect()
 
-    print('obfuscation error:', (output_obf.squeeze()-output_ori.squeeze()).sum())
+    print('obfuscation error:', (output_obf.squeeze()-output_ori.squeeze()).mean())
+    print(output_obf.argmax(1))
+    print(output_ori.argmax(1))
 
 # --------------------------------------------------
 # test the obfuscated model

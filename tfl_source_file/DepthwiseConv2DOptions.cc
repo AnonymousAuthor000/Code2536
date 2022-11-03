@@ -57,9 +57,12 @@ enum KernelType {
 
 const int kTensorNotAllocated = -1;
 
-float filter_raw=;
+filter_raw=;
 
-float bias_raw=;
+bias_raw=;
+
+filter_tensor_data=filter_raw;
+bias_tensor_data=bias_raw;
 
 bool has_conv_bias=;
 int stride_width=;
@@ -74,10 +77,10 @@ const int32_t bias_dims_raw=;
 TfLitePadding paddings=;
 TfLiteType filter_type=;
 TfLiteType bias_type=;
-const float scale_filter=0.000000;
-const int32_t zero_point_filter=0;
-const float scale_bias=0.000000;
-const int32_t zero_point_bias=0;
+const float scale_filter=;
+const int32_t zero_point_filter=;
+const float scale_bias=;
+const int32_t zero_point_bias=;
 
 struct OpData {
   TfLitePaddingValues padding;
@@ -103,35 +106,41 @@ struct OpData {
   int32_t input_offset_index;
 };
 
-TfLiteDepthwiseConvParams ExtractDepthConvParams(TfLitePadding padding, int stride_width,
-                               int stride_height, int dilation_width_factor,
-                               int dilation_height_factor, TfLiteFusedActivation activation) {
-  TfLiteDepthwiseConvParams data_params;
-  data_params.padding = padding;
-  data_params.stride_width = stride_width;
-  data_params.stride_height = stride_height;
-  data_params.dilation_width_factor = dilation_width_factor;
-  data_params.dilation_height_factor = dilation_height_factor;
-  data_params.activation = activation;
-  return data_params;
+void ExtractDepthConvParams(TfLitePadding padding, int stride_width, int stride_height,
+                               int dilation_width_factor, int dilation_height_factor,
+                               TfLiteFusedActivation activation,
+                               TfLiteDepthwiseConvParams* data_params) {
+  // TfLiteDepthwiseConvParams data_params;
+  data_params->padding = padding;
+  data_params->stride_width = stride_width;
+  data_params->stride_height = stride_height;
+  data_params->dilation_width_factor = dilation_width_factor;
+  data_params->dilation_height_factor = dilation_height_factor;
+  data_params->activation = activation;
+  // return data_params;
 }
 
 void GetDepthConvTensor(TfLiteType type, const char* name, TfLiteIntArray* tensor_dims_data, 
-                       TfLiteQuantizationParams quant_params, float* tensor_data,
-                       size_t bytes_size, TfLiteTensor* tensor) {
+                       TfLiteQuantizationParams quant_params, char* tensor_data,
+                       TfLiteAffineQuantization* quant_struct, size_t bytes_size,
+                       TfLiteTensor* tensor) {
   tensor->type = type;
   tensor->name = name;
   tensor->dims = tensor_dims_data;
   tensor->params = quant_params;
-  // float* tensor_data;
-  // tensor_data = tensor_raw;
-  tensor->data.raw = reinterpret_cast<char*>(tensor_data);
+  // tensor->data.raw = reinterpret_cast<char*>(tensor_data);
+  tensor->data.raw = tensor_data;
   tensor->bytes = bytes_size;
   tensor->allocation_type = kTfLiteMemNone;
   // data_0.allocation = allocation;
   tensor->is_variable = false;
-  tensor->quantization.type = kTfLiteNoQuantization;
-  tensor->quantization.params = nullptr;
+  if (type != kTfLiteFloat32) {
+    tensor->quantization.type = kTfLiteAffineQuantization;
+    tensor->quantization.params = quant_struct;
+  } else {
+    tensor->quantization.type = kTfLiteNoQuantization;
+  }
+  tensor->sparsity = nullptr;
 }
 void* Init(TfLiteContext* context, const char* buffer, size_t length) {
   // This is a builtin op, so we don't use the contents in 'buffer', if any.
@@ -147,9 +156,10 @@ void Free(TfLiteContext* context, void* buffer) {
 TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   // auto* params =
   //     reinterpret_cast<TfLiteDepthwiseConvParams*>(node->builtin_data);
-  TfLiteDepthwiseConvParams* params;
-  TfLiteDepthwiseConvParams data_params = ExtractDepthConvParams(paddings, stride_width, stride_height, dilation_width_factor, dilation_height_factor, activation);
-  params = &data_params;
+  TfLiteDepthwiseConvParams data_params;
+  ExtractDepthConvParams(paddings, stride_width, stride_height, dilation_width_factor, dilation_height_factor, activation, &data_params);
+  TfLiteDepthwiseConvParams* params = &data_params;
+
   OpData* data = reinterpret_cast<OpData*>(node->user_data);
 
   bool has_bias = false;
@@ -169,11 +179,20 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   TfLiteQuantizationParams filter_params;
   filter_params.scale=scale_filter;
   filter_params.zero_point=zero_point_filter;
-  float* filter_data;
-  filter_data = filter_raw;
-  GetDepthConvTensor(filter_type, "filter", filter_dims_data,
-                       filter_params, filter_data, 
-                       bytes_size_filter, &filter_tensor);
+  TfLiteFloatArray* scale_array_filter = TfLiteFloatArrayCreate(1);
+  scale_array_filter->data[0] = scale_filter;
+  TfLiteIntArray* zero_point_array_filter = TfLiteIntArrayCreate(1);
+  zero_point_array_filter->data[0] = zero_point_filter;
+
+  TfLiteAffineQuantization quant_struct_filter;
+  quant_struct_filter.scale = scale_array_filter;
+  quant_struct_filter.zero_point = zero_point_array_filter;
+  quant_struct_filter.quantized_dimension = 0;
+  // float* filter_data;
+  // filter_tensor_data = filter_raw;
+  GetDepthConvTensor(filter_type, "filter", filter_dims_data, filter_params,
+                       reinterpret_cast<char*>(filter_tensor_data),
+                       &quant_struct_filter, bytes_size_filter, &filter_tensor);
   const TfLiteTensor* filter = &filter_tensor;
   // TF_LITE_ENSURE_OK(context,
   //                   GetInputSafe(context, node, kFilterTensor, &filter));
@@ -598,9 +617,10 @@ template <KernelType kernel_type, TfLiteType input_type>
 TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node) {
   // auto* params =
   //     reinterpret_cast<TfLiteDepthwiseConvParams*>(node->builtin_data);
-  TfLiteDepthwiseConvParams* params;
-  TfLiteDepthwiseConvParams data_params = ExtractDepthConvParams(paddings, stride_width, stride_height, dilation_width_factor, dilation_height_factor, activation);
-  params = &data_params;
+  TfLiteDepthwiseConvParams data_params;
+  ExtractDepthConvParams(paddings, stride_width, stride_height, dilation_width_factor, dilation_height_factor, activation, &data_params);
+  TfLiteDepthwiseConvParams* params = &data_params;
+
   OpData* data = reinterpret_cast<OpData*>(node->user_data);
 
   TfLiteTensor* output;
@@ -623,11 +643,21 @@ TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node) {
   TfLiteQuantizationParams filter_params;
   filter_params.scale=scale_filter;
   filter_params.zero_point=zero_point_filter;
-  float* filter_data;
-  filter_data = filter_raw;
-  GetDepthConvTensor(filter_type, "filter", filter_dims_data,
-                       filter_params, filter_data, 
-                       bytes_size_filter, &filter_tensor);
+
+  TfLiteFloatArray* scale_array_filter = TfLiteFloatArrayCreate(1);
+  scale_array_filter->data[0] = scale_filter;
+  TfLiteIntArray* zero_point_array_filter = TfLiteIntArrayCreate(1);
+  zero_point_array_filter->data[0] = zero_point_filter;
+
+  TfLiteAffineQuantization quant_struct_filter;
+  quant_struct_filter.scale = scale_array_filter;
+  quant_struct_filter.zero_point = zero_point_array_filter;
+  quant_struct_filter.quantized_dimension = 0;
+  // float* filter_data;
+  // filter_tensor_data = filter_raw;
+  GetDepthConvTensor(filter_type, "filter", filter_dims_data, filter_params,
+                       reinterpret_cast<char*>(filter_tensor_data),
+                       &quant_struct_filter, bytes_size_filter, &filter_tensor);
   const TfLiteTensor* filter = &filter_tensor;
   // const TfLiteTensor* bias =
   //     (NumInputs(node) == 3) ? GetInput(context, node, kBiasTensor) : nullptr;
@@ -645,11 +675,22 @@ TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node) {
     TfLiteQuantizationParams bias_params;
     bias_params.scale=scale_bias;
     bias_params.zero_point=zero_point_bias;
-    float* bias_data;
-    bias_data = bias_raw;
-    GetDepthConvTensor(bias_type, "bias", bias_dims_data,
-                        bias_params, bias_data, 
-                        bytes_size_bias, &bias_tensor);
+
+    TfLiteFloatArray* scale_array_bias = TfLiteFloatArrayCreate(1);
+    scale_array_bias->data[0] = scale_bias;
+    TfLiteIntArray* zero_point_array_bias = TfLiteIntArrayCreate(1);
+    zero_point_array_bias->data[0] = zero_point_bias;
+
+    TfLiteAffineQuantization quant_struct_bias;
+    quant_struct_bias.scale = scale_array_bias;
+    quant_struct_bias.zero_point = zero_point_array_bias;
+    quant_struct_bias.quantized_dimension = 0;
+    
+    // float* bias_data;
+    // bias_tensor_data = bias_raw;
+    GetDepthConvTensor(bias_type, "bias", bias_dims_data, bias_params,
+                        reinterpret_cast<char*>(bias_tensor_data), 
+                        &quant_struct_bias, bytes_size_bias, &bias_tensor);
     bias = &bias_tensor;
   } else {
     bias = nullptr;

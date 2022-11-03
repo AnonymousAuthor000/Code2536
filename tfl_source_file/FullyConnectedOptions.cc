@@ -42,12 +42,14 @@ namespace randopname {
 
 namespace {
 
-float filter_raw=;
+filter_raw=;
 
-float bias_raw=;
+bias_raw=;
+
+filter_tensor_data=filter_raw;
+bias_tensor_data=bias_raw;
 
 bool has_conv_bias=;
-
 const TfLiteFusedActivation activation=;
 const TfLiteFullyConnectedWeightsFormat weights_format=;
 const bool keep_num_dims=;
@@ -59,54 +61,45 @@ const int filter_dims_size=;
 const int32_t bias_dims_raw=;
 const int bias_dims_size=;
 
-const float scale_filter=0.000000;
-const int32_t zero_point_filter=0;
-const float scale_bias=0.000000;
-const int32_t zero_point_bias=0;
+const float scale_filter=;
+const int32_t zero_point_filter=;
+const float scale_bias=;
+const int32_t zero_point_bias=;
 
-// // const int32_t* filter_dims_data;
-// const int32_t* filter_dims_data = filter_dims_raw;
-// // const int32_t* bias_dims_data;
-// const int32_t* bias_dims_data = bias_dims_raw;
-
-// // const float* filter_data;
-// auto* filter_data = filter_raw;
-// // const float* bias_data;
-// auto* bias_data = bias_raw;
-// // filter_sparsity
-
-// const bool is_sparse=false;
-// // TfLiteSparsity* sparsity;
-
-TfLiteFullyConnectedParams ExtractFullyConnectedParams(
+void ExtractFullyConnectedParams(
                                TfLiteFullyConnectedWeightsFormat weights_format, 
-                               bool keep_num_dims, bool asymmetric_quantize_inputs, TfLiteFusedActivation activation) {
-  TfLiteFullyConnectedParams data_params;
-  data_params.weights_format = weights_format;
-  data_params.keep_num_dims = keep_num_dims;
-  data_params.asymmetric_quantize_inputs = asymmetric_quantize_inputs;
-  data_params.activation = activation;
-  return data_params;
+                               bool keep_num_dims, bool asymmetric_quantize_inputs,
+                               TfLiteFusedActivation activation,
+                               TfLiteFullyConnectedParams* data_params) {
+  // TfLiteFullyConnectedParams data_params;
+  data_params->weights_format = weights_format;
+  data_params->keep_num_dims = keep_num_dims;
+  data_params->asymmetric_quantize_inputs = asymmetric_quantize_inputs;
+  data_params->activation = activation;
+  // return data_params;
 }
 
 
 void GetFullyConnectedTensor(TfLiteType type, const char* name, 
                        TfLiteIntArray* tensor_dims_data, 
-                       TfLiteQuantizationParams quant_params, float* tensor_data,
-                       size_t bytes_size, TfLiteTensor* tensor) {
+                       TfLiteQuantizationParams quant_params, char* tensor_data,
+                       TfLiteAffineQuantization* quant_struct, size_t bytes_size, TfLiteTensor* tensor) {
   tensor->type = type;
   tensor->name = name;
   tensor->dims = tensor_dims_data;
   tensor->params = quant_params;
-  // float* tensor_data;
-  // tensor_data = tensor_raw;
-  tensor->data.raw = reinterpret_cast<char*>(tensor_data);
+  // tensor->data.raw = reinterpret_cast<char*>(tensor_data);
+  tensor->data.raw = tensor_data;
   tensor->bytes = bytes_size;
   tensor->allocation_type = kTfLiteMemNone;
   // data_0.allocation = allocation;
   tensor->is_variable = false;
-  tensor->quantization.type = kTfLiteNoQuantization;
-  tensor->quantization.params = nullptr;
+  if (type != kTfLiteFloat32) {
+    tensor->quantization.type = kTfLiteAffineQuantization;
+    tensor->quantization.params = quant_struct;
+  } else {
+    tensor->quantization.type = kTfLiteNoQuantization;
+  }
   tensor->sparsity = nullptr;
 }
 
@@ -258,11 +251,10 @@ void Free(TfLiteContext* context, void* buffer) {
 TfLiteStatus PrepareImpl(TfLiteContext* context, TfLiteNode* node) {
   // auto* params =
   //     reinterpret_cast<TfLiteFullyConnectedParams*>(node->builtin_data);
-  TfLiteFullyConnectedParams* params;
-  TfLiteFullyConnectedParams data_params = ExtractFullyConnectedParams(
-                               weights_format, keep_num_dims,
-                               asymmetric_quantize_inputs, activation);
-  params = &data_params;
+  TfLiteFullyConnectedParams data_params;
+  ExtractFullyConnectedParams(weights_format, keep_num_dims,
+                              asymmetric_quantize_inputs, activation, &data_params);
+  TfLiteFullyConnectedParams* params = &data_params;
   OpData* data = reinterpret_cast<OpData*>(node->user_data);
   // Check we have all the inputs and outputs we need.
   // TF_LITE_ENSURE(context, node->inputs->size == 2 || node->inputs->size == 3);
@@ -289,11 +281,21 @@ TfLiteStatus PrepareImpl(TfLiteContext* context, TfLiteNode* node) {
   TfLiteQuantizationParams filter_params;
   filter_params.scale=scale_filter;
   filter_params.zero_point=zero_point_filter;
-  float* filter_data;
-  filter_data = filter_raw;
-  GetFullyConnectedTensor(filter_type, "filter", filter_dims_data,
-                       filter_params, filter_data, 
-                       bytes_size_filter, &filter_tensor);
+
+  TfLiteFloatArray* scale_array_filter = TfLiteFloatArrayCreate(1);
+  scale_array_filter->data[0] = scale_filter;
+  TfLiteIntArray* zero_point_array_filter = TfLiteIntArrayCreate(1);
+  zero_point_array_filter->data[0] = zero_point_filter;
+
+  TfLiteAffineQuantization quant_struct_filter;
+  quant_struct_filter.scale = scale_array_filter;
+  quant_struct_filter.zero_point = zero_point_array_filter;
+  quant_struct_filter.quantized_dimension = 0;
+  // float* filter_data;
+  // filter_tensor_data = filter_raw;
+  GetFullyConnectedTensor(filter_type, "filter", filter_dims_data, filter_params,
+                       reinterpret_cast<char*>(filter_tensor_data),
+                       &quant_struct_filter, bytes_size_filter, &filter_tensor);
   const TfLiteTensor* filter = &filter_tensor;
 
   // const TfLiteTensor* bias =
@@ -314,11 +316,22 @@ TfLiteStatus PrepareImpl(TfLiteContext* context, TfLiteNode* node) {
     TfLiteQuantizationParams bias_params;
     bias_params.scale=scale_bias;
     bias_params.zero_point=zero_point_bias;
-    float* bias_data;
-    bias_data = bias_raw;
-    GetFullyConnectedTensor(bias_type, "bias", bias_dims_data,
-                        bias_params, bias_data, 
-                        bytes_size_bias, &bias_tensor);
+
+    TfLiteFloatArray* scale_array_bias = TfLiteFloatArrayCreate(1);
+    scale_array_bias->data[0] = scale_bias;
+    TfLiteIntArray* zero_point_array_bias = TfLiteIntArrayCreate(1);
+    zero_point_array_bias->data[0] = zero_point_bias;
+
+    TfLiteAffineQuantization quant_struct_bias;
+    quant_struct_bias.scale = scale_array_bias;
+    quant_struct_bias.zero_point = zero_point_array_bias;
+    quant_struct_bias.quantized_dimension = 0;
+    
+    // float* bias_data;
+    // bias_tensor_data = bias_raw;
+    GetFullyConnectedTensor(bias_type, "bias", bias_dims_data, bias_params,
+                        reinterpret_cast<char*>(bias_tensor_data), 
+                        &quant_struct_bias, bytes_size_bias, &bias_tensor);
     bias = &bias_tensor;
   } else {
     bias = nullptr;
@@ -493,11 +506,10 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   // Check for supported activation types.
   // auto* params =
   //     reinterpret_cast<TfLiteFullyConnectedParams*>(node->builtin_data);
-  TfLiteFullyConnectedParams* params;
-  TfLiteFullyConnectedParams data_params = ExtractFullyConnectedParams(
-                               weights_format, keep_num_dims,
-                               asymmetric_quantize_inputs, activation);
-  params = &data_params;
+  TfLiteFullyConnectedParams data_params;
+  ExtractFullyConnectedParams(weights_format, keep_num_dims,
+                              asymmetric_quantize_inputs, activation, &data_params);
+  TfLiteFullyConnectedParams* params = &data_params;
 
   // const TfLiteTensor* filter;
   // TF_LITE_ENSURE_OK(context,
@@ -514,11 +526,21 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   TfLiteQuantizationParams filter_params;
   filter_params.scale=scale_filter;
   filter_params.zero_point=zero_point_filter;
-  float* filter_data;
-  filter_data = filter_raw;
-  GetFullyConnectedTensor(filter_type, "filter", filter_dims_data,
-                       filter_params, filter_data, 
-                       bytes_size_filter, &filter_tensor);
+
+  TfLiteFloatArray* scale_array_filter = TfLiteFloatArrayCreate(1);
+  scale_array_filter->data[0] = scale_filter;
+  TfLiteIntArray* zero_point_array_filter = TfLiteIntArrayCreate(1);
+  zero_point_array_filter->data[0] = zero_point_filter;
+
+  TfLiteAffineQuantization quant_struct_filter;
+  quant_struct_filter.scale = scale_array_filter;
+  quant_struct_filter.zero_point = zero_point_array_filter;
+  quant_struct_filter.quantized_dimension = 0;
+  // float* filter_data;
+  // filter_tensor_data = filter_raw;
+  GetFullyConnectedTensor(filter_type, "filter", filter_dims_data, filter_params,
+                       reinterpret_cast<char*>(filter_tensor_data),
+                       &quant_struct_filter, bytes_size_filter, &filter_tensor);
   const TfLiteTensor* filter = &filter_tensor;
 
   const TfLiteTensor* input;
@@ -1228,11 +1250,10 @@ template <KernelType kernel_type>
 TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   // auto* params =
   //     reinterpret_cast<TfLiteFullyConnectedParams*>(node->builtin_data);
-  TfLiteFullyConnectedParams* params;
-  TfLiteFullyConnectedParams data_params = ExtractFullyConnectedParams(
-                               weights_format, keep_num_dims,
-                               asymmetric_quantize_inputs, activation);
-  params = &data_params;
+  TfLiteFullyConnectedParams data_params;
+  ExtractFullyConnectedParams(weights_format, keep_num_dims,
+                              asymmetric_quantize_inputs, activation, &data_params);
+  TfLiteFullyConnectedParams* params = &data_params;
 
   OpData* data = reinterpret_cast<OpData*>(node->user_data);
 
@@ -1254,11 +1275,21 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   TfLiteQuantizationParams filter_params;
   filter_params.scale=scale_filter;
   filter_params.zero_point=zero_point_filter;
-  float* filter_data;
-  filter_data = filter_raw;
-  GetFullyConnectedTensor(filter_type, "filter", filter_dims_data,
-                       filter_params, filter_data, 
-                       bytes_size_filter, &filter_tensor);
+
+  TfLiteFloatArray* scale_array_filter = TfLiteFloatArrayCreate(1);
+  scale_array_filter->data[0] = scale_filter;
+  TfLiteIntArray* zero_point_array_filter = TfLiteIntArrayCreate(1);
+  zero_point_array_filter->data[0] = zero_point_filter;
+
+  TfLiteAffineQuantization quant_struct_filter;
+  quant_struct_filter.scale = scale_array_filter;
+  quant_struct_filter.zero_point = zero_point_array_filter;
+  quant_struct_filter.quantized_dimension = 0;
+  // float* filter_data;
+  // filter_tensor_data = filter_raw;
+  GetFullyConnectedTensor(filter_type, "filter", filter_dims_data, filter_params,
+                       reinterpret_cast<char*>(filter_tensor_data),
+                       &quant_struct_filter, bytes_size_filter, &filter_tensor);
   const TfLiteTensor* filter = &filter_tensor;
 
   // const TfLiteTensor* bias =
@@ -1279,11 +1310,22 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
     TfLiteQuantizationParams bias_params;
     bias_params.scale=scale_bias;
     bias_params.zero_point=zero_point_bias;
-    float* bias_data;
-    bias_data = bias_raw;
-    GetFullyConnectedTensor(bias_type, "bias", bias_dims_data,
-                        bias_params, bias_data, 
-                        bytes_size_bias, &bias_tensor);
+
+    TfLiteFloatArray* scale_array_bias = TfLiteFloatArrayCreate(1);
+    scale_array_bias->data[0] = scale_bias;
+    TfLiteIntArray* zero_point_array_bias = TfLiteIntArrayCreate(1);
+    zero_point_array_bias->data[0] = zero_point_bias;
+
+    TfLiteAffineQuantization quant_struct_bias;
+    quant_struct_bias.scale = scale_array_bias;
+    quant_struct_bias.zero_point = zero_point_array_bias;
+    quant_struct_bias.quantized_dimension = 0;
+    
+    // float* bias_data;
+    // bias_tensor_data = bias_raw;
+    GetFullyConnectedTensor(bias_type, "bias", bias_dims_data, bias_params,
+                        reinterpret_cast<char*>(bias_tensor_data), 
+                        &quant_struct_bias, bytes_size_bias, &bias_tensor);
     bias = &bias_tensor;
   } else {
     bias = nullptr;
