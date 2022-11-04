@@ -62,7 +62,7 @@ It should return:
 
 You can use the default setting (just type Return/Enter for every option).
 
-5. Copy the congigurations and script to the source code:  
+5. Copy the configurations and script to the source code:  
 
 `cp ./files/kernel_files/* ./tensorflow-2.9.1/tensorflow/lite/kernels/`
 
