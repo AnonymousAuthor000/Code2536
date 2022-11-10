@@ -8,7 +8,7 @@ Code for the submission Code2536
 
 `docker pull anonymousauthor000/code2536:v2`
 
-Note that if it cause permissions error, please try: 
+Note that if it cause permission errors, please try: 
 
 `sudo docker pull anonymousauthor000/code2536:v2`
 
@@ -16,7 +16,7 @@ Note that if it cause permissions error, please try:
 
 `docker run -i -t anonymousauthor000/code2536:v2 /bin/bash`
 
-Note that if it cause permissions error, please try: 
+Note that if it cause permission errors, please try: 
 
 `docker run -i -t anonymousauthor000/code2536:v2 /bin/bash`
 
