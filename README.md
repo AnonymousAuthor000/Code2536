@@ -2,15 +2,15 @@
 
 Code for the submission Code2536
 
-## Preparation A: get the environment by Docker (recommend)
+## 1*. Preparation A: get the environment by Docker (recommend)
 
-0. Download the Docker Image:
+(0) Download the Docker Image:
 
 `docker pull anonymousauthor000/code2536:v2`
 
 Note that if it cause permissions error, please try `sudo docker pull anonymousauthor000/code2536:v2`
 
-1. Enter the environment:
+(1) Enter the environment:
 
 `docker run -i -t anonymousauthor000/code2536:v2 /bin/bash`
 
@@ -18,19 +18,19 @@ Note that if it cause permissions error, please try `docker run -i -t anonymousa
 
 `cd Code2536/`
 
-2. Activate the conda environment: 
+(2) Activate the conda environment: 
 
 `conda activate code2536`
 
-## Preparation B: build the environment
+## 1*. Preparation B: build the environment
 
-0. Download the code:
+(0) Download the code:
 
 `git clone https://github.com/AnonymousAuthor000/Code2536.git`
 
 `cd Code2536`
 
-1. The dependency can be found in `environment.yml`. To create the conda environment:
+(1) The dependency can be found in `environment.yml`. To create the conda environment:
 
 `conda env create -f environment.yml`
 
@@ -51,7 +51,7 @@ Install the jsonrepair:
 Note that the recommend version of gcc and g++ is 9.4.0.
 
 
-2. Download the source code of the TensorFlow. Here we test our tool on v2.9.1.
+(2) Download the source code of the TensorFlow. Here we test our tool on v2.9.1.
 
 `wget https://github.com/tensorflow/tensorflow/archive/refs/tags/v2.9.1.zip`
 
@@ -59,7 +59,7 @@ Unzip the file:
 
 `unzip v2.9.1`
 
-3. Download the Bazel:
+(3) Download the Bazel:
 
 `wget https://github.com/bazelbuild/bazelisk/releases/download/v1.14.0/bazelisk-linux-amd64`
 
@@ -74,7 +74,7 @@ You can test the Bazel:
 It should return:
 `/usr/local/bin/bazel`
 
-4. Configure the build:
+(4) Configure the build:
 
 `cd tensorflow-2.9.1/`
 
@@ -84,7 +84,7 @@ It should return:
 
 You can use the default setting (just type Return/Enter for every option).
 
-5. Copy the configurations and script to the source code:  
+(5) Copy the configurations and script to the source code:  
 
 `cp ./files/kernel_files/* ./tensorflow-2.9.1/tensorflow/lite/kernels/`
 
@@ -92,9 +92,9 @@ You can use the default setting (just type Return/Enter for every option).
 
 Note that you can mofify the maximal number of jobs in the 'build.sh' script. Here I set it as `--jobs=14`. 
 
-## Test
+## 2. Test
 
-1. Build the obfuscation model:
+(1) Build the obfuscation model:
 
 `bash build_obf.sh`
 
