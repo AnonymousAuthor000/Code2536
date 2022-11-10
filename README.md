@@ -6,11 +6,15 @@ Code for the submission Code2536
 
 0. Download the Docker Image:
 
-`sudo docker pull anonymousauthor000/code2536:v2`
+`docker pull anonymousauthor000/code2536:v2`
+
+Note that if it cause permissions error, please try `sudo docker pull anonymousauthor000/code2536:v2`
 
 1. Enter the environment:
 
-`sudo docker run -i -t anonymousauthor000/code2536:v2 /bin/bash`
+`docker run -i -t anonymousauthor000/code2536:v2 /bin/bash`
+
+Note that if it cause permissions error, please try `docker run -i -t anonymousauthor000/code2536:v2 /bin/bash`
 
 `cd Code2536/`
 
