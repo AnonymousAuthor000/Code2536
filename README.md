@@ -8,14 +8,19 @@ Code for the submission Code2536
 
 `docker pull anonymousauthor000/code2536:v2`
 
-Note that if it cause permissions error, please try `sudo docker pull anonymousauthor000/code2536:v2`
+Note that if it cause permissions error, please try: 
+
+`sudo docker pull anonymousauthor000/code2536:v2`
 
 (1) Enter the environment:
 
 `docker run -i -t anonymousauthor000/code2536:v2 /bin/bash`
 
-Note that if it cause permissions error, please try `docker run -i -t anonymousauthor000/code2536:v2 /bin/bash`
+Note that if it cause permissions error, please try: 
 
+`docker run -i -t anonymousauthor000/code2536:v2 /bin/bash`
+
+Enter the project:
 `cd Code2536/`
 
 (2) Activate the conda environment: 
