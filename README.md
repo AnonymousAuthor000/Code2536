@@ -2,7 +2,23 @@
 
 Code for the submission Code2536
 
-## Preparation
+## Preparation A: get the environment by Docker (recommend)
+
+0. Download the Docker Image:
+
+`sudo docker pull anonymousauthor000/code2536:v2`
+
+1. Enter the environment:
+
+`sudo docker run -i -t anonymousauthor000/code2536:v2 /bin/bash`
+
+`cd Code2536/`
+
+2. Activate the conda environment: 
+
+`conda activate code2536`
+
+## Preparation B: build the environment
 
 0. Download the code:
 
@@ -27,6 +43,8 @@ Install the Flatbuffer:
 Install the jsonrepair:
 
 `npm install -g jsonrepair`
+
+Note that the recommend version of gcc and g++ is 9.4.0.
 
 
 2. Download the source code of the TensorFlow. Here we test our tool on v2.9.1.
